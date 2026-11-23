@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "target": "ES2023",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "rewriteRelativeImportExtensions": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "tests"]
+}

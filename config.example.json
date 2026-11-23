@@ -1,0 +1,9 @@
+{
+  "databasePath": "./data/engineering-intelligence.db",
+  "scopes": [
+    { "id": "shared", "displayName": "Shared Engineering", "type": "shared", "rootPath": "./replace-with-shared-folder" },
+    { "id": "example-project", "displayName": "Example Project", "type": "project", "rootPath": "./replace-with-project-folder" }
+  ],
+  "exclude": ["**/.git/**", "**/.obsidian/**", "**/node_modules/**", "**/.env*"],
+  "search": { "defaultLimit": 5, "maxLimit": 20 }
+}
