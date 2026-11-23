@@ -55,6 +55,17 @@ Search accepts up to 512 UTF-16 code units. It treats Unicode words and numbers 
 
 Output is JSON by default, including when `--json` is supplied. An empty `results` array means the search succeeded with no eligible matches. Invalid input and missing indexes produce diagnostics on stderr with exit code 1. After building, `node dist/cli.js search` accepts the same arguments.
 
+## Browse the index
+
+```sh
+pnpm viewer
+pnpm viewer -- --port 4400 --no-open
+```
+
+This starts a read-only page at `http://127.0.0.1:4317` and opens it in the default browser. The page lists indexed documents per scope with counts and the last scan time. It also runs scoped searches and shows cited documents with line numbers, highlighting the cited lines. It calls the same search and document services as the MCP server, binds to localhost only, and takes the index guard per request, so indexing can run while it is open. Stop it with Ctrl+C. After a build, `node dist/viewer/server.js` accepts the same flags.
+
+Generic SQLite tools cannot open the database file because they do not recognize Turso's `USING fts` index in the schema. Use the viewer or the CLI instead.
+
 ## Local MCP server
 
 Build with `pnpm build`. The stdio launch command from the project root is:

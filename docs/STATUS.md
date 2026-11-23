@@ -6,6 +6,8 @@ The CLI can validate configuration, index and rebuild Markdown, report status, a
 
 The local MCP stdio server now exposes ranked search and bounded document reads. An official SDK client verified discovery, invocation, source citations, scope isolation and clean protocol output for the source and compiled entry points. [Server](../src/mcp/server.ts) · [Protocol test](../tests/mcp.test.ts)
 
+`pnpm viewer` opens a read-only localhost page for browsing indexed documents, running scoped searches and reading cited lines. It has no automated test yet. [Viewer usage](../README.md#browse-the-index)
+
 ## Host verification and optional pilot
 
 Codex CLI 0.171.0 launched the compiled server, searched a synthetic project, read the returned document ID, and cited the correct path and lines for two engineering decisions. [Verified host setup](CODEX_HOST.md)

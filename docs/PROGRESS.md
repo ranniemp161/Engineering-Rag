@@ -59,3 +59,7 @@ Configured the operator-approved GroceryOS repository as a project scope in the 
 ### Verified GroceryOS retrieval in VS Code
 
 The operator's Codex chat screenshot showed Engineering search followed by document retrieval for a GroceryOS offline oversell question. Checked the answer against Decision 0020 line 5 and lines 14–16 in the source checkout. Both citations supported the claims. [Current status](STATUS.md)
+
+### Added a local index viewer
+
+Added `pnpm viewer`, a read-only page on 127.0.0.1 that opens in the default browser. It lists indexed documents per scope, runs scoped searches and shows cited documents with line numbers. It reuses `searchKnowledge`, `getDocument` and `indexStatus` and takes the guarded read-only connection for each request. Generic SQLite viewers report the database as malformed because they cannot parse Turso's `USING fts` index, so this gives operators a supported way to inspect it. Files: `src/viewer/server.ts`, `src/viewer/page.ts`, `package.json` and README. Typecheck, lint and build passed. Against the GroceryOS index, the HTTP endpoints listed 53 documents, returned 15 project hits for `oversell` and read a cited document. A request for a project document without the project ID was rejected with `Document unavailable in the requested scope`. The page was not exercised in a browser, and no automated test covers the viewer yet. [README](../README.md#browse-the-index)
