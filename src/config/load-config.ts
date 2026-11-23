@@ -30,6 +30,17 @@ const schema = z.strictObject({
       maxLimit: limit.default(20),
     })
     .prefault({}),
+  // Optional hybrid retrieval. Omitting it keeps keyword-only search.
+  semantic: z
+    .strictObject({
+      model: text.default("Xenova/bge-small-en-v1.5"),
+      modelDir: text.default("./data/models"),
+      queryPrefix: z.string().max(200).optional(),
+      passagePrefix: z.string().max(200).optional(),
+      keywordWeight: z.number().min(0).max(10).default(1),
+      semanticWeight: z.number().min(0).max(10).default(1),
+    })
+    .optional(),
 });
 
 export type Config = z.infer<typeof schema>;
@@ -165,6 +176,21 @@ export async function loadConfig(
     }
   } catch (error) {
     throw new Error(`Invalid databasePath: ${(error as Error).message}`);
+  }
+  if (config.semantic) {
+    const semantic = config.semantic;
+    try {
+      const directory = await canonicalDestination(
+        localPath(base, semantic.modelDir, "semantic.modelDir"),
+      );
+      semantic.modelDir = localPath(base, directory, "Resolved modelDir");
+      if (roots.some((root) => contains(root, directory)))
+        throw new Error("Choose a model directory outside source roots");
+    } catch (error) {
+      throw new Error(`Invalid semantic.modelDir: ${(error as Error).message}`);
+    }
+    if (semantic.keywordWeight + semantic.semanticWeight === 0)
+      throw new Error("semantic weights cannot both be zero");
   }
   return config;
 }

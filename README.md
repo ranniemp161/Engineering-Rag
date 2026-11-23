@@ -87,6 +87,41 @@ The JSON report includes hit@1, hit@3, hit@5 and hit@20 (the configured maximum 
 
 Record real misses as cases when an agent or search fails to find a note you know exists. These cases are the evidence the specification requires before adding semantic retrieval.
 
+## Hybrid retrieval (optional)
+
+Keyword search misses questions phrased in other words. Hybrid retrieval adds a local embedding model and merges its ranking with the keyword ranking. It is off unless the configuration has a `semantic` section:
+
+```json
+"semantic": {
+  "model": "Xenova/bge-small-en-v1.5",
+  "modelDir": "./data/models",
+  "keywordWeight": 1,
+  "semanticWeight": 1
+}
+```
+
+Every field is optional; the values shown are the defaults. `modelDir` resolves relative to the configuration file and must lie outside source roots. `queryPrefix` and `passagePrefix` override the retrieval prefixes. Known prefixes are built in for `bge-small-en-v1.5`, `bge-base-en-v1.5`, `multilingual-e5-small` and `all-MiniLM-L6-v2`.
+
+The embedding runtime, `@huggingface/transformers`, is a regular dependency. [pnpm-workspace.yaml](pnpm-workspace.yaml) denies the install scripts of `onnxruntime-node` and `protobufjs`, so a frozen install succeeds without running them. `onnxruntime-node` ships prebuilt binaries for Windows, macOS and Linux. After adding the section, download the model once (this needs network access) and index:
+
+```sh
+pnpm dev -- fetch-model
+pnpm dev -- index
+```
+
+`fetch-model` downloads the configured model, about 33 MB for the default, into `modelDir`. No other command downloads; they all run offline. `index`, `rebuild` and `watch` then embed every passage that has no vector for the configured model. Unchanged notes are not embedded again, and changing `model` replaces all vectors on the next run. The first run embeds the whole index, which took about 40 seconds for 447 passages here. The guard is held during that run, so MCP calls report `INDEX_BUSY` until it finishes. If the package or model is missing, keyword indexing still completes, and the command reports the problem and exits with code 1.
+
+With `semantic` configured, `search`, the MCP tool, the viewer and `eval` run in hybrid mode. Each takes the top 50 keyword passages and the top 50 by exact cosine similarity within the allowed scopes, then merges them with weighted Reciprocal Rank Fusion (`weight / (60 + rank)`). In this mode `score` is the fused score. Without embeddings, a default search falls back to keywords and logs a diagnostic to stderr. `--mode keyword` or `--mode hybrid` on `search` and `eval` forces a mode, and a forced hybrid search fails instead of falling back. `status` lists vectors per model for each scope.
+
+An MCP server process loads the model on its first hybrid search, about 0.6 s on the test machine, and later searches took about 50 ms. Restart the MCP host after enabling `semantic` or rebuilding.
+
+Measured on 26 GroceryOS cases, against the keyword baseline (hit@5 0.769, MRR 0.588):
+
+- `bge-small-en-v1.5` at the default weights raised hit@5 to 0.885 and MRR to 0.755. All keyword cases ranked first, and paraphrase hit@5 rose from 0.571 to 0.786.
+- `"semanticWeight": 2` raised MRR to 0.785.
+
+Compare settings with `eval --mode keyword` and `eval --baseline` before changing them.
+
 ## Browse the index
 
 ```sh

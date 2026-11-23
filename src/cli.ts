@@ -12,6 +12,18 @@ import {
 } from "./evaluation/evaluate.ts";
 import { parseArgs } from "node:util";
 import { searchKnowledge } from "./retrieval/search-service.ts";
+import { embedPending } from "./semantic/embed-index.ts";
+import {
+  type Embedder,
+  fetchModel,
+  getEmbedder,
+} from "./semantic/embedder.ts";
+
+function parseMode(value: string | undefined) {
+  if (value === undefined || value === "keyword" || value === "hybrid")
+    return value;
+  throw new Error("--mode must be keyword or hybrid");
+}
 
 try {
   const args = process.argv.slice(2);
@@ -20,15 +32,25 @@ try {
   if (
     (!["search", "watch", "eval"].includes(command ?? "") &&
       args.length !== 1) ||
-    !["index", "rebuild", "status", "search", "watch", "eval"].includes(
-      command ?? "",
-    )
+    ![
+      "index",
+      "rebuild",
+      "status",
+      "search",
+      "watch",
+      "eval",
+      "fetch-model",
+    ].includes(command ?? "")
   )
     throw new Error(
-      'Usage: pnpm dev -- index|status|rebuild, search "keywords" [--project ID] [--limit N] [--json], watch [--debounce MS] [--reconcile MINUTES], or eval [--file CASES] [--baseline REPORT] [--output REPORT]',
+      'Usage: pnpm dev -- index|status|rebuild|fetch-model, search "keywords" [--project ID] [--limit N] [--mode keyword|hybrid] [--json], watch [--debounce MS] [--reconcile MINUTES], or eval [--file CASES] [--baseline REPORT] [--output REPORT] [--mode keyword|hybrid]',
     );
   const config = await loadConfig(undefined, { allowUnavailableRoots: true });
-  if (command === "eval") {
+  if (command === "fetch-model") {
+    if (!config.semantic)
+      throw new Error('Add a "semantic" section to the configuration first');
+    console.log(JSON.stringify(await fetchModel(config.semantic), null, 2));
+  } else if (command === "eval") {
     const { values } = parseArgs({
       args: rest,
       options: {
@@ -39,6 +61,7 @@ try {
         },
         baseline: { type: "string" },
         output: { type: "string" },
+        mode: { type: "string" },
       },
     });
     const file = path.resolve(values.file);
@@ -46,7 +69,9 @@ try {
     const baseline = values.baseline
       ? await readReport(path.resolve(values.baseline))
       : undefined;
-    const report = await runEvaluation(config, cases, file);
+    const report = await runEvaluation(config, cases, file, {
+      mode: parseMode(values.mode) ?? (config.semantic ? "hybrid" : "keyword"),
+    });
     if (values.output)
       await writeFile(
         path.resolve(values.output),
@@ -91,16 +116,21 @@ try {
       options: {
         project: { type: "string" },
         limit: { type: "string" },
+        mode: { type: "string" },
         json: { type: "boolean" },
       },
     });
     if (positionals.length !== 1)
       throw new Error("Supply one search query, quoting multiple words");
-    const output = await searchKnowledge(config, {
-      query: positionals[0],
-      projectId: values.project,
-      limit: values.limit === undefined ? undefined : Number(values.limit),
-    });
+    const output = await searchKnowledge(
+      config,
+      {
+        query: positionals[0],
+        projectId: values.project,
+        limit: values.limit === undefined ? undefined : Number(values.limit),
+      },
+      { mode: parseMode(values.mode) },
+    );
     console.log(JSON.stringify(output, null, 2));
   } else if (
     command === "status" &&
@@ -110,6 +140,14 @@ try {
   )
     console.log(JSON.stringify({ initialized: false, scopes: [] }));
   else {
+    // Load the model before taking the index guard; failure does not block indexing.
+    let embedder: Embedder | undefined;
+    let embedFailure: string | undefined;
+    if (command !== "status" && config.semantic)
+      embedder = await getEmbedder(config.semantic).catch((error: Error) => {
+        embedFailure = error.message;
+        return undefined;
+      });
     const output = await withIndex(
       config.databasePath,
       command === "status",
@@ -118,10 +156,19 @@ try {
         if (command === "status") return indexStatus(db);
         const result = await indexNotes(db, config, command === "rebuild");
         if (result.some((scope) => scope.errors.length)) process.exitCode = 1;
+        if (embedder)
+          await embedPending(db, embedder).catch((error: Error) => {
+            embedFailure = error.message;
+          });
         return result;
       },
     );
     console.log(JSON.stringify(output, null, 2));
+    if (embedFailure) {
+      // Keyword indexing committed; embeddings resume on the next run.
+      console.error(`Embeddings not updated: ${embedFailure}`);
+      process.exitCode = 1;
+    }
   }
 } catch (error) {
   console.error((error as Error).message);

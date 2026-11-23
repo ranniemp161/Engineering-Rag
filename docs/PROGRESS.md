@@ -85,3 +85,56 @@ Also fixed garbled characters in the viewer page committed in `9f4f030`: `…`, 
 Recorded a local GroceryOS baseline of 26 cases (12 keyword, 14 paraphrase) in the ignored `data/eval-baseline.json`. Expected documents were chosen from decision-record titles. Overall: hit@1 0.462, hit@5 0.769, hit@20 0.846, MRR 0.588, p95 latency 13.5 ms. Keyword cases: hit@5 1.0, MRR 0.875. Paraphrase cases: hit@5 0.571, MRR 0.342. Four paraphrases found no expected document in 20 results (decisions 0004, 0007, 0009 and 0015). Rerunning against the baseline with the CLI and the built viewer reported no regressions.
 
 Checks on Node 26.12.1: typecheck, lint, build and all 15 tests passed. The new evaluation tests passed in three runs. The viewer's inline script was parsed with Node, and its endpoints were exercised over HTTP, but the Evaluate view was not opened in a browser. [Evaluation tests](../tests/eval.test.ts) · [Specification](../ENGINEERING_INTELLIGENCE_SPEC.md#milestone-6--retrieval-evaluation-post-mvp)
+
+### Built Milestone 7: hybrid retrieval (dependency install pending)
+
+Added optional hybrid retrieval, specified as Milestone 7.
+- **Probe of Turso 0.8.4:** `vector32` and `vector_distance_cos` work, Float32 blob binding works, chunk deletion cascades to vectors, and an exact scan of 10,000 × 384 vectors took about 24 ms. `libsql_vector_idx` failed to parse, so no approximate index is used.
+- **Probe of `@huggingface/transformers` 4.3.2** (installed only in a scratch folder): its install scripts were skipped and it still ran on Windows. A cached model loaded offline in about 0.3 s. A model that was not cached failed immediately with remote access disabled.
+- **Configuration:** an optional `semantic` section with validated `modelDir` and weights.
+- **Embedder:** loaded through a variable dynamic import so the dependency stays optional. Only `fetch-model` may download.
+- **Schema version 2:** adds `chunk_embeddings`. Version 1 indexes upgrade on write and stay searchable read-only.
+- **Embedding:** `embedPending` runs after scans in `index`, `rebuild` and `watch`, in batches that each commit, re-embeds only new chunks and replaces vectors when the model changes.
+- **Search:** weighted Reciprocal Rank Fusion over 50 scoped keyword and 50 scoped exact-cosine candidates. Default searches fall back to keywords when no embedder or vectors exist; `--mode hybrid` fails instead.
+- **Reporting:** `--mode` on `search` and `eval`, mode and model in reports, and vectors per scope and model in `status`.
+
+Files: `src/semantic/embedder.ts`, `src/semantic/embed-index.ts`, `src/retrieval/search-service.ts`, `src/storage/turso.ts`, `src/config/load-config.ts`, `src/indexing/index-service.ts`, `src/indexing/watch-service.ts`, `src/evaluation/evaluate.ts`, `src/cli.ts`, `tests/semantic.test.ts`, README and specification.
+
+**Measurement.** The scratch copy of transformers ran the GroceryOS evaluation on a scratch index built read-only from the approved scope. It used the project's indexing, embedding and evaluation code with a scratch embedder adapter. The real index was not modified. Keyword baseline: hit@5 0.769, MRR 0.588.
+
+| Model, weights (keyword:semantic) | hit@1 | hit@5 | hit@20 | MRR | Top-5 regressions |
+|---|---|---|---|---|---|
+| `bge-small-en-v1.5`, 1:1 | 0.654 | 0.885 | 0.962 | 0.755 | none |
+| `bge-small-en-v1.5`, 1:2 | 0.692 | 0.885 | 0.962 | 0.785 | none |
+| `all-MiniLM-L6-v2`, 1:1 | 0.615 | 0.885 | 1.0 | 0.744 | none |
+| `multilingual-e5-small`, 1:1 | 0.692 | 0.846 | 0.923 | 0.744 | pa-login, 5 to 18 |
+
+- With `bge-small-en-v1.5` at 1:1, keyword-case hit@1 rose from 0.75 to 1.0 and paraphrase hit@5 from 0.571 to 0.786.
+- Two of the four former misses entered the top 5 (decisions 0007 and 0009). The other two now rank 10 and 13.
+- `pa-tingi` fell from rank 10 to outside the top 20; `multilingual-e5-small` and `all-MiniLM-L6-v2` ranked it 4 and 2.
+- Embedding 447 chunks took about 41 s. p95 query latency, including query embedding, was 45–55 ms.
+- Chose `bge-small-en-v1.5` at 1:1 as the default. The 1:2 result is documented, not made the default: the 26 cases are few and were written from decision titles.
+
+**Checks** on Node 26.12.1: typecheck, lint, build and all 20 tests passed. The new semantic tests run offline with a deterministic fake embedder.
+
+**Blocked.** Adding `@huggingface/transformers@4.3.2` to `package.json` with `pnpm add` was denied by the session's permission classifier, and was not attempted another way. The operator needs to run the install. After the install, still to do:
+- Run `fetch-model` and re-index.
+- Rerun the real evaluation through the project and update the GroceryOS baseline.
+- Confirm the MCP server in a host.
+- Check pnpm's handling of the skipped install scripts of `onnxruntime-node` and `protobufjs`.
+
+[Semantic tests](../tests/semantic.test.ts) · [Specification](../ENGINEERING_INTELLIGENCE_SPEC.md#milestone-7--hybrid-retrieval-post-mvp)
+
+### Completed Milestone 7 on the real index
+
+The operator ran `pnpm add @huggingface/transformers@4.3.2`. The package was added, but pnpm 12.16.1 exited with `ERR_PNPM_IGNORED_BUILDS` for `onnxruntime-node` and `protobufjs`, and `pnpm install --frozen-lockfile` then failed the same way. `onnxruntime-node` 1.30.0 ships prebuilt bindings for win32, darwin and linux, and the package imported and ran without its scripts, so both scripts were denied with `pnpm approve-builds`. That added `pnpm-workspace.yaml` with `allowBuilds: false` for both, after which the frozen install passed.
+
+Enabling `"semantic": {}` exposed a bug that the fake-embedder tests could not catch. After `fetch-model`, the offline load failed because transformers.js rejects disabling both local and remote models. The embedder now enables local models confined to `modelDir` (`localModelPath`) and writes the underlying load error to stderr only.
+
+Results:
+- `fetch-model` downloaded `bge-small-en-v1.5` (384 dimensions).
+- `index` embedded all 447 GroceryOS chunks in 36 s; an unchanged rerun took 1 s. `status` reports 447 vectors for the model.
+- `eval --baseline data/eval-baseline.json` exited 0 with no regressions. Hybrid results matched the scratch measurement: hit@1 0.654, hit@5 0.885, hit@20 0.962, MRR 0.755. Keyword cases scored hit@1 1.0; paraphrase cases hit@5 0.786. Improvements: `pa-bad-debt` (miss to 4), `pa-offline-limit` (8 to 2), `pa-subscription-ends` (miss to 5). The report is saved in the ignored `data/eval-hybrid.json`.
+- An SDK client called the built MCP server with the operator configuration. Hybrid results had fused scores and the server wrote nothing to stderr. The first call, including the model load, took 623 ms; the second took 52 ms.
+
+Typecheck, lint, build and all 20 tests passed. The coding host's running MCP server still uses the earlier build until it is restarted.

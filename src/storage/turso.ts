@@ -46,24 +46,37 @@ export async function withIndex<T>(
   }
 }
 
-export async function migrate(db: Database, readonly: boolean) {
+// Version 2 adds chunk embeddings for optional hybrid retrieval.
+const EMBEDDINGS = `
+  CREATE TABLE chunk_embeddings(chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+    model TEXT NOT NULL, embedding BLOB NOT NULL);`;
+
+/**
+ * Creates or upgrades the index schema and returns its version. A read-only
+ * connection accepts version 1, which simply has no embeddings to search.
+ */
+export async function migrate(db: Database, readonly: boolean): Promise<number> {
   const tables = await db.all(
     "SELECT name FROM sqlite_schema WHERE type='table'",
   );
   if (tables.some((row) => row.name === "engineering_index_version")) {
-    const version = await db.get(
-      "SELECT version FROM engineering_index_version",
-    );
-    if (version?.version !== 1)
-      throw new Error("Unsupported engineering index schema");
-    return;
+    const version = (
+      await db.get("SELECT version FROM engineering_index_version")
+    )?.version;
+    if (version === 2 || (version === 1 && readonly)) return version;
+    if (version !== 1) throw new Error("Unsupported engineering index schema");
+    await db.transactionAsync(async (tx) => {
+      await tx.exec(EMBEDDINGS);
+      await tx.exec("UPDATE engineering_index_version SET version = 2");
+    })();
+    return 2;
   }
   if (tables.length || readonly)
     throw new Error("Expected an Engineering Intelligence index");
   await db.transactionAsync(async (tx) => {
     await tx.exec(`
       CREATE TABLE engineering_index_version(version INTEGER NOT NULL);
-      INSERT INTO engineering_index_version VALUES (1);
+      INSERT INTO engineering_index_version VALUES (2);
       CREATE TABLE scopes(id TEXT PRIMARY KEY, display_name TEXT NOT NULL, root_path TEXT NOT NULL, scope_type TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE documents(id TEXT PRIMARY KEY, scope_id TEXT NOT NULL REFERENCES scopes(id) ON DELETE CASCADE,
         relative_path TEXT NOT NULL, title TEXT NOT NULL, tags TEXT NOT NULL, content_hash TEXT NOT NULL,
@@ -78,6 +91,8 @@ export async function migrate(db: Database, readonly: boolean) {
         updated INTEGER NOT NULL, removed INTEGER NOT NULL);
       CREATE TABLE index_errors(id INTEGER PRIMARY KEY, run_id TEXT NOT NULL REFERENCES index_runs(id) ON DELETE CASCADE,
         relative_path TEXT NOT NULL, code TEXT NOT NULL, message TEXT NOT NULL);
+      ${EMBEDDINGS}
     `);
   })();
+  return 2;
 }

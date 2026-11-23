@@ -3,7 +3,10 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { z } from "zod";
 import type { Config } from "../config/load-config.ts";
-import { searchKnowledge } from "../retrieval/search-service.ts";
+import {
+  type SearchOptions,
+  searchKnowledge,
+} from "../retrieval/search-service.ts";
 
 const text = z.string().trim().min(1);
 const expectation = z.strictObject({
@@ -55,6 +58,9 @@ export interface Summary {
 export interface EvalReport {
   generatedAt: string;
   file: string;
+  /** Older reports predate hybrid retrieval and omit these. */
+  mode?: "keyword" | "hybrid";
+  model?: string | null;
   depth: number;
   summary: Summary;
   byTag: Record<string, Summary>;
@@ -147,8 +153,15 @@ export async function runEvaluation(
   config: Config,
   cases: EvalCase[],
   file: string,
+  options: SearchOptions & { mode: "keyword" | "hybrid" } = {
+    mode: config.semantic ? "hybrid" : "keyword",
+  },
 ): Promise<EvalReport> {
   const depth = config.search.maxLimit;
+  const model =
+    options.mode === "hybrid"
+      ? (options.embedder?.model ?? config.semantic?.model ?? null)
+      : null;
   const results: CaseResult[] = [];
   for (const item of cases) {
     const started = performance.now();
@@ -156,11 +169,11 @@ export async function runEvaluation(
     let error: string | undefined;
     try {
       found = (
-        await searchKnowledge(config, {
-          query: item.query,
-          projectId: item.projectId,
-          limit: depth,
-        })
+        await searchKnowledge(
+          config,
+          { query: item.query, projectId: item.projectId, limit: depth },
+          options,
+        )
       ).results;
     } catch (failure) {
       error = (failure as Error).message;
@@ -200,6 +213,8 @@ export async function runEvaluation(
   return {
     generatedAt: new Date().toISOString(),
     file: path.basename(file),
+    mode: options.mode,
+    model,
     depth,
     summary: summarize(results),
     byTag: group(results, (r) => (r.tags.length ? r.tags : ["untagged"])),

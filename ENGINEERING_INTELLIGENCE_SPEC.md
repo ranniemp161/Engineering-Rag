@@ -64,7 +64,7 @@ Build a **local-first Engineering Intelligence Engine** that indexes user-approv
 
 ### Embedded driver and compatibility
 
-Use the official local-file driver. Reject remote URLs and network-share paths. Runtime configuration contains a local database path only. Dependencies may be downloaded during setup. Indexing and MCP retrieval must work offline after setup. The Turso engine is SQLite-compatible but implements its own keyword index. Its native exact vector functions are a future evaluation option. The MVP schema has no embeddings.
+Use the official local-file driver. Reject remote URLs and network-share paths. Runtime configuration contains a local database path only. Dependencies may be downloaded during setup. Indexing and MCP retrieval must work offline after setup. The Turso engine is SQLite-compatible but implements its own keyword index. Its native exact vector functions are a future evaluation option. The MVP schema has no embeddings. Milestone 7 verified `vector32` and `vector_distance_cos` on Turso 0.8.4, with Float32 blobs and cascading deletes. An exact scan of 10,000 × 384 vectors took about 24 ms, and schema version 2 stores the embeddings.
 
 The Windows compatibility milestone verifies scoped ranking and cross-process access before application scaffolding. Record the exact SDK version, query shape, feature flags, and limitations. A failed gate requires review before implementation proceeds.
 
@@ -525,6 +525,18 @@ Started on 2026-11-24 as the next post-MVP milestone. It implements the evaluati
 - Do not change the MCP tool contracts, the schema or the index.
 - **Exit:** Fixture tests cover exact metrics, line constraints, grouping, baseline regressions and case changes, invalid and unreachable cases, and the viewer endpoint. A baseline for an approved real scope is recorded, separating keyword queries from paraphrased ones.
 
+### Milestone 7 — Hybrid retrieval (post-MVP)
+
+Started on 2026-11-24. It implements future extension 2. The Milestone 6 baseline supplied the required evidence: 4 of 14 paraphrased GroceryOS questions found no expected document, and paraphrase hit@5 was 0.571 against 1.0 for keyword queries.
+
+- Keep hybrid retrieval optional. An optional `semantic` configuration section names the embedding model, a local model directory outside source roots, optional query and passage prefixes, and the keyword and semantic weights for fusion. Without it, behaviour stays keyword-only.
+- Use a local embedding model through the optional `@huggingface/transformers` dependency. Only the explicit `fetch-model` command may download. Every other operation disables remote model access, so indexing and retrieval stay offline after setup. A missing package or model is a clear diagnostic. Default searches fall back to keywords, while explicit hybrid requests fail.
+- Schema version 2 adds `chunk_embeddings` (one vector per chunk and model, cascading with chunks). Version 1 indexes upgrade on the next write and remain searchable read-only.
+- After each scan, `index`, `rebuild` and `watch` embed chunks without a vector for the configured model, in batches that each commit separately. Unchanged documents keep their vectors. Changing the model replaces all vectors. Keyword indexing commits even when embedding fails, and the run exits with code 1.
+- Retrieve scoped candidates from Turso's native full-text index and from exact `vector_distance_cos` ordering (no approximate index), and combine them with weighted Reciprocal Rank Fusion (k = 60). Keep snippets, de-duplication, the response budget and scope isolation. The MCP contract is unchanged; `score` becomes the fused score in hybrid mode.
+- Add `--mode keyword|hybrid` to `search` and `eval`, record mode and model in evaluation reports, and report vectors per scope and model in `status`.
+- **Exit:** Offline fixture tests with a deterministic embedder cover fusion, paraphrase retrieval, scope isolation, incremental and model-change re-embedding, schema upgrade and fallback, mode comparison, configuration validation and the offline failure path. On the approved real scope, hybrid retrieval improves paraphrase hit@5 over the keyword baseline with no keyword case leaving the top 5.
+
 **Stop after each milestone for review if running in an interactive Codex session.** Do not implement the whole roadmap in one unreviewed pass.
 
 ## 15. Test plan and acceptance matrix
@@ -565,7 +577,7 @@ For an existing installation, create a separate Turso index file. Reindex approv
 ## 17. Future extensions — explicitly out of scope
 
 1. **Graphify adapter:** Retrieve symbol dependencies and code impact information from an installed Graphify instance, after verifying its actual APIs and version. Do not assume its MCP tool names or schemas.
-2. **Hybrid retrieval:** Add embeddings and vector search only after collecting retrieval quality failures that keyword search cannot solve. Evaluate exact cosine similarity in the embedded engine against scoped retrieval quality and latency. Verify any approximate index on the selected driver before relying on it.
+2. **Hybrid retrieval:** Add embeddings and vector search only after collecting retrieval quality failures that keyword search cannot solve. Evaluate exact cosine similarity in the embedded engine against scoped retrieval quality and latency. Verify any approximate index on the selected driver before relying on it. Delivered as Milestone 7 with exact cosine search. Turso 0.8.4 rejected the `libsql_vector_idx` index syntax, so no approximate index is used.
 3. **Skills-aware retrieval:** Index selected `SKILL.md` metadata and provide explicit skill selection. Skills are operational instructions and must be reviewed before being elevated to agent guidance.
 4. **Automatic project detection:** Safely map a verified repository path to a configured project scope, with manual override.
 5. **Incremental watcher:** Debounced file watching with recovery and periodic reconciliation. Delivered as Milestone 5.
@@ -580,7 +592,7 @@ For an existing installation, create a separate Turso index file. Reindex approv
 - **Selected knowledge folders:** Must be explicitly approved before indexing.
 - **Initial project scope:** `groceryos` is illustrative; no actual notes are assumed to exist.
 - **Index refresh:** Manual CLI in MVP. Milestone 5 adds the optional `watch` command. Starting it at logon is left to the operator.
-- **Embedding model:** Not selected because vector retrieval is deferred.
+- **Embedding model:** Milestone 7 defaults to `Xenova/bge-small-en-v1.5` (384 dimensions, 8-bit quantized, about 33 MB). It was chosen from four candidates measured on the GroceryOS evaluation cases.
 
 ## 19. Definition of done (MVP)
 
