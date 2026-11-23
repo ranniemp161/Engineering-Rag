@@ -1,6 +1,7 @@
 node_modules/
 dist/
 config.local.json
+evaluation.local.json
 data/
 *.db
 *.db-*

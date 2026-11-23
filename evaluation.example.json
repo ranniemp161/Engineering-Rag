@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "id": "keyword-offline-retries",
+      "query": "offline inventory retries",
+      "projectId": "example-project",
+      "tags": ["keyword"],
+      "expect": [{ "path": "decisions/offline-retries.md", "lines": [3, 4] }],
+      "note": "Uses the decision's own wording."
+    },
+    {
+      "id": "paraphrase-offline-retries",
+      "query": "how long to wait before sending again after a failure",
+      "projectId": "example-project",
+      "tags": ["paraphrase"],
+      "expect": [{ "path": "decisions/offline-retries.md" }],
+      "note": "Asks the same question without the decision's keywords."
+    },
+    {
+      "id": "shared-code-review",
+      "query": "code review checklist",
+      "tags": ["keyword"],
+      "expect": [{ "path": "practices/code-review.md", "scope": "shared" }]
+    }
+  ]
+}

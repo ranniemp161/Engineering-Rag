@@ -73,6 +73,20 @@ Search accepts up to 512 UTF-16 code units. It treats Unicode words and numbers 
 
 Output is JSON by default, including when `--json` is supplied. An empty `results` array means the search succeeded with no eligible matches. Invalid input and missing indexes produce diagnostics on stderr with exit code 1. After building, `node dist/cli.js search` accepts the same arguments.
 
+## Measure retrieval quality
+
+```sh
+pnpm dev -- eval
+pnpm dev -- eval --output data/eval-baseline.json
+pnpm dev -- eval --baseline data/eval-baseline.json
+```
+
+`eval` runs a set of known questions through the same search service the MCP tool uses and reports where the expected notes rank. Copy [evaluation.example.json](evaluation.example.json) to `evaluation.local.json` (ignored by Git) or pass `--file`; `ENGINEERING_INTELLIGENCE_EVAL` also sets the default. Each case has a unique `id`, a `query`, an optional `projectId`, and one or more `expect` entries. An entry names a `path` relative to its scope, an optional `scope` (defaulting to the case's project, otherwise `shared`), and optional inclusive `lines`, which a cited passage must overlap. Optional `tags` group the results, for example `keyword` for queries that use a note's own words and `paraphrase` for the same question in other words. Cases that expect a scope their search cannot reach are rejected.
+
+The JSON report includes hit@1, hit@3, hit@5 and hit@20 (the configured maximum limit), mean reciprocal rank, recall@5 and latency percentiles. It gives these overall, per tag and per project, along with each case's rank and top three results. `--output` saves the report. `--baseline` compares the run with a saved report and lists metric deltas, added and removed cases, improvements and regressions. A regression is a case that was in the top 5 and no longer is, and any regression makes the command exit with code 1. Update the baseline deliberately after an accepted change.
+
+Record real misses as cases when an agent or search fails to find a note you know exists. These cases are the evidence the specification requires before adding semantic retrieval.
+
 ## Browse the index
 
 ```sh
@@ -80,7 +94,7 @@ pnpm viewer
 pnpm viewer -- --port 4400 --no-open
 ```
 
-This starts a read-only page at `http://127.0.0.1:4317` and opens it in the default browser. The page lists indexed documents per scope with counts and the last scan time. It also runs scoped searches and shows cited documents with line numbers, highlighting the cited lines. It calls the same search and document services as the MCP server, binds to localhost only, and takes the index guard per request, so indexing can run while it is open. Stop it with Ctrl+C. After a build, `node dist/viewer/server.js` accepts the same flags.
+This starts a read-only page at `http://127.0.0.1:4317` and opens it in the default browser. The page lists indexed documents per scope with counts and the last scan time. It also runs scoped searches and shows cited documents with line numbers, highlighting the cited lines. **Evaluate** runs the evaluation cases and shows the metrics, per-tag and per-project tables, and each case's rank. Click a case to run its search. `--eval FILE` selects the cases and `--baseline REPORT` adds the comparison. It calls the same search and document services as the MCP server, binds to localhost only, and takes the index guard per request, so indexing can run while it is open. Stop it with Ctrl+C. After a build, `node dist/viewer/server.js` accepts the same flags.
 
 Generic SQLite tools cannot open the database file because they do not recognize Turso's `USING fts` index in the schema. Use the viewer or the CLI instead.
 

@@ -2,7 +2,14 @@ import { loadConfig } from "./config/load-config.ts";
 import { indexNotes, indexStatus } from "./indexing/index-service.ts";
 import { watchNotes } from "./indexing/watch-service.ts";
 import { migrate, withIndex } from "./storage/turso.ts";
-import { stat } from "node:fs/promises";
+import { stat, writeFile } from "node:fs/promises";
+import path from "node:path";
+import {
+  compareReports,
+  loadEvalCases,
+  readReport,
+  runEvaluation,
+} from "./evaluation/evaluate.ts";
 import { parseArgs } from "node:util";
 import { searchKnowledge } from "./retrieval/search-service.ts";
 
@@ -11,14 +18,44 @@ try {
   if (args[0] === "--") args.shift();
   const [command, ...rest] = args;
   if (
-    (!["search", "watch"].includes(command ?? "") && args.length !== 1) ||
-    !["index", "rebuild", "status", "search", "watch"].includes(command ?? "")
+    (!["search", "watch", "eval"].includes(command ?? "") &&
+      args.length !== 1) ||
+    !["index", "rebuild", "status", "search", "watch", "eval"].includes(
+      command ?? "",
+    )
   )
     throw new Error(
-      'Usage: pnpm dev -- index|status|rebuild, search "keywords" [--project ID] [--limit N] [--json], or watch [--debounce MS] [--reconcile MINUTES]',
+      'Usage: pnpm dev -- index|status|rebuild, search "keywords" [--project ID] [--limit N] [--json], watch [--debounce MS] [--reconcile MINUTES], or eval [--file CASES] [--baseline REPORT] [--output REPORT]',
     );
   const config = await loadConfig(undefined, { allowUnavailableRoots: true });
-  if (command === "watch") {
+  if (command === "eval") {
+    const { values } = parseArgs({
+      args: rest,
+      options: {
+        file: {
+          type: "string",
+          default:
+            process.env.ENGINEERING_INTELLIGENCE_EVAL ?? "evaluation.local.json",
+        },
+        baseline: { type: "string" },
+        output: { type: "string" },
+      },
+    });
+    const file = path.resolve(values.file);
+    const cases = await loadEvalCases(file, config);
+    const baseline = values.baseline
+      ? await readReport(path.resolve(values.baseline))
+      : undefined;
+    const report = await runEvaluation(config, cases, file);
+    if (values.output)
+      await writeFile(
+        path.resolve(values.output),
+        `${JSON.stringify(report, null, 2)}\n`,
+      );
+    const comparison = baseline && compareReports(baseline, report);
+    if (comparison?.regressions.length) process.exitCode = 1;
+    console.log(JSON.stringify({ ...report, comparison }, null, 2));
+  } else if (command === "watch") {
     const { values } = parseArgs({
       args: rest,
       options: {

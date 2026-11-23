@@ -514,6 +514,17 @@ Approved by the operator on 2026-11-23 as the first post-MVP milestone. It imple
 - Do not change the MCP tool contracts, the schema or the configuration file.
 - **Exit:** Fixture tests cover create, edit and delete in nested folders; ignored excluded and non-Markdown files; one rescan per burst of edits; retry after a busy index; a root that appears later; a root that is moved away and replaced; reconciliation; and the CLI's JSON output. The existing suite still passes. A run against an approved real scope is recorded.
 
+### Milestone 6 — Retrieval evaluation (post-MVP)
+
+Started on 2026-11-24 as the next post-MVP milestone. It implements the evaluation corpus and metrics from future extension 6 and produces the evidence that extension 2 (hybrid retrieval) requires.
+
+- Define an operator-local evaluation file (`evaluation.local.json`, ignored by Git, with a committed placeholder example). Each case has a unique ID, a query, an optional project, tags, and one or more expected documents. An expected document has a scope, a relative path and optional inclusive lines that a cited passage must overlap. Reject cases whose expected scope the search cannot reach.
+- Add an `eval` CLI command. It runs each case through `searchKnowledge` at the configured maximum limit and reports hit@1, hit@3, hit@5, hit@depth, MRR, recall@5 and latency percentiles, overall and per tag and per project, along with each case's rank and top results. A search error counts as a miss.
+- Support saving a report and comparing a run with a saved baseline. Report metric deltas, added and removed cases, improvements and regressions (a case that falls out of the top 5). Exit with code 1 on any regression.
+- Show the same report and comparison in the local viewer.
+- Do not change the MCP tool contracts, the schema or the index.
+- **Exit:** Fixture tests cover exact metrics, line constraints, grouping, baseline regressions and case changes, invalid and unreachable cases, and the viewer endpoint. A baseline for an approved real scope is recorded, separating keyword queries from paraphrased ones.
+
 **Stop after each milestone for review if running in an interactive Codex session.** Do not implement the whole roadmap in one unreviewed pass.
 
 ## 15. Test plan and acceptance matrix
@@ -558,7 +569,7 @@ For an existing installation, create a separate Turso index file. Reindex approv
 3. **Skills-aware retrieval:** Index selected `SKILL.md` metadata and provide explicit skill selection. Skills are operational instructions and must be reviewed before being elevated to agent guidance.
 4. **Automatic project detection:** Safely map a verified repository path to a configured project scope, with manual override.
 5. **Incremental watcher:** Debounced file watching with recovery and periodic reconciliation. Delivered as Milestone 5.
-6. **Retrieval diagnostics:** Local dashboard, query evaluation corpus, and retrieval metrics.
+6. **Retrieval diagnostics:** Local dashboard, query evaluation corpus, and retrieval metrics. The corpus, metrics and viewer report were delivered as Milestone 6.
 7. **Packaging:** npm-distributed executable with documented updates and cross-platform installation.
 8. **Remote MCP transport:** Only if there is a concrete need; requires separate authentication, authorization, and threat modeling.
 

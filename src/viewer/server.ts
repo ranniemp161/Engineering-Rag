@@ -1,8 +1,15 @@
 // Local read-only browser viewer for the index. Run `pnpm viewer`.
 import { exec } from "node:child_process";
 import { createServer } from "node:http";
+import path from "node:path";
 import { parseArgs } from "node:util";
 import { loadConfig } from "../config/load-config.ts";
+import {
+  compareReports,
+  loadEvalCases,
+  readReport,
+  runEvaluation,
+} from "../evaluation/evaluate.ts";
 import { indexStatus } from "../indexing/index-service.ts";
 import { getDocument } from "../retrieval/get-document.ts";
 import { searchKnowledge } from "../retrieval/search-service.ts";
@@ -14,8 +21,16 @@ const { values } = parseArgs({
   options: {
     port: { type: "string", default: process.env.PORT ?? "4317" },
     "no-open": { type: "boolean" },
+    eval: {
+      type: "string",
+      default:
+        process.env.ENGINEERING_INTELLIGENCE_EVAL ?? "evaluation.local.json",
+    },
+    baseline: { type: "string" },
   },
 });
+const evalFile = path.resolve(values.eval);
+const baselineFile = values.baseline && path.resolve(values.baseline);
 const port = Number(values.port);
 if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw new Error("--port must be an integer from 1 to 65535");
@@ -45,6 +60,18 @@ async function api(route: string, query: URLSearchParams) {
       projectId,
       limit: number("limit") ?? config.search.maxLimit,
     });
+  if (route === "/api/eval") {
+    const report = await runEvaluation(
+      config,
+      await loadEvalCases(evalFile, config),
+      evalFile,
+    );
+    const baseline = baselineFile ? await readReport(baselineFile) : undefined;
+    return {
+      ...report,
+      comparison: baseline ? compareReports(baseline, report) : undefined,
+    };
+  }
   if (route === "/api/doc")
     return getDocument(config, {
       documentId: query.get("id") ?? "",
