@@ -42,6 +42,24 @@ After building, use `node dist/cli.js` with the same command. Each command print
 
 The local database directory must be writable for the persistent sibling guard file. Concurrent commands wait up to one second to acquire the guard, then report `INDEX_BUSY` so the caller can retry.
 
+## Keep the index current automatically
+
+```sh
+pnpm dev -- watch
+pnpm dev -- watch --debounce 2000 --reconcile 30
+```
+
+`watch` performs a startup scan of every scope, then rescans a scope about one second after its Markdown changes stop. It ignores excluded paths and files other than Markdown, so code edits in a project repository do not trigger rescans. Continuous changes are rescanned at least every 10 seconds. Each rescan is the same transactional scan as `index`, and the guard is held only while it runs, so the MCP server and viewer keep working. A busy index is retried, and a root that is missing or replaced is reattached without a restart. Every `--reconcile` minutes (default 15, `0` disables) it rescans all scopes to cover missed filesystem events. `--debounce` sets the quiet period in milliseconds (default 1000).
+
+Each event is printed as one JSON line on stdout (`watching`, `scan`, `busy`, `watch-error`, `error`, `stopped`). Stop with Ctrl+C. Restart `watch` after editing the configuration. After a build, `node dist/cli.js watch` accepts the same flags.
+
+To run it at logon on Windows, create a scheduled task that runs the built command. Replace the example paths:
+
+```powershell
+$action = New-ScheduledTaskAction -Execute 'C:/example/node24/node.exe' -Argument 'C:/example/engineering/dist/cli.js watch' -WorkingDirectory 'C:/example/engineering'
+Register-ScheduledTask -TaskName 'Engineering index watch' -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0)
+```
+
 ## Search indexed notes
 
 ```sh

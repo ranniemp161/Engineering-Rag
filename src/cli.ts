@@ -1,5 +1,6 @@
 import { loadConfig } from "./config/load-config.ts";
 import { indexNotes, indexStatus } from "./indexing/index-service.ts";
+import { watchNotes } from "./indexing/watch-service.ts";
 import { migrate, withIndex } from "./storage/turso.ts";
 import { stat } from "node:fs/promises";
 import { parseArgs } from "node:util";
@@ -10,14 +11,43 @@ try {
   if (args[0] === "--") args.shift();
   const [command, ...rest] = args;
   if (
-    (command !== "search" && args.length !== 1) ||
-    !["index", "rebuild", "status", "search"].includes(command ?? "")
+    (!["search", "watch"].includes(command ?? "") && args.length !== 1) ||
+    !["index", "rebuild", "status", "search", "watch"].includes(command ?? "")
   )
     throw new Error(
-      'Usage: pnpm dev -- index|status|rebuild or search "keywords" [--project ID] [--limit N] [--json]',
+      'Usage: pnpm dev -- index|status|rebuild, search "keywords" [--project ID] [--limit N] [--json], or watch [--debounce MS] [--reconcile MINUTES]',
     );
   const config = await loadConfig(undefined, { allowUnavailableRoots: true });
-  if (command === "search") {
+  if (command === "watch") {
+    const { values } = parseArgs({
+      args: rest,
+      options: {
+        debounce: { type: "string", default: "1000" },
+        reconcile: { type: "string", default: "15" },
+      },
+    });
+    const debounceMs = Number(values.debounce);
+    const reconcileMinutes = Number(values.reconcile);
+    if (!Number.isInteger(debounceMs) || debounceMs < 50 || debounceMs > 60_000)
+      throw new Error("--debounce must be 50 to 60000 milliseconds");
+    if (
+      !Number.isFinite(reconcileMinutes) ||
+      reconcileMinutes < 0 ||
+      reconcileMinutes > 1440
+    )
+      throw new Error("--reconcile must be 0 (off) to 1440 minutes");
+    const stop = new AbortController();
+    for (const signal of ["SIGINT", "SIGTERM"] as const)
+      process.once(signal, () => stop.abort());
+    // One JSON object per line so logs can be followed and parsed.
+    await watchNotes(config, {
+      signal: stop.signal,
+      debounceMs,
+      reconcileMs: reconcileMinutes * 60_000,
+      report: (event) =>
+        console.log(JSON.stringify({ at: new Date().toISOString(), ...event })),
+    });
+  } else if (command === "search") {
     const { positionals, values } = parseArgs({
       args: rest,
       allowPositionals: true,

@@ -502,6 +502,18 @@ These are fixture column names. Bind the validated query, permitted project ID (
 - Validate a real task against fixture or approved vault notes.
 - **Exit:** End-to-end demonstration: host retrieves a specific note and cites its source; limitations documented.
 
+### Milestone 5 — Automatic index refresh (post-MVP)
+
+Approved by the operator on 2026-11-23 as the first post-MVP milestone. It implements future extension 5 (incremental watcher). Automatic project detection remains a separate, later item.
+
+- Add a `watch` CLI command that keeps the index current while it runs. Use recursive filesystem watching per configured root. Ignore excluded paths and files other than Markdown. Treat events without an extension as possible directory changes.
+- Debounce changes per scope, with a quiet period and a maximum wait. Rescan only the affected scopes through the existing transactional scope scan. Hash skipping, deletion only after a complete enumeration and preservation of an unavailable root's entries must behave as they do for `index`.
+- Hold the index guard only during a rescan, so MCP reads and other commands can interleave. Retry a busy index after a delay. Do not retry other failures on a timer.
+- Recover without a restart. A missing root is reattached when it appears. A root found unavailable is reattached by path. A periodic reconciliation (default 15 minutes, configurable, can be disabled) renews watchers and rescans every scope to cover missed events.
+- Print one JSON object per line to stdout. Stop cleanly on SIGINT or SIGTERM.
+- Do not change the MCP tool contracts, the schema or the configuration file.
+- **Exit:** Fixture tests cover create, edit and delete in nested folders; ignored excluded and non-Markdown files; one rescan per burst of edits; retry after a busy index; a root that appears later; a root that is moved away and replaced; reconciliation; and the CLI's JSON output. The existing suite still passes. A run against an approved real scope is recorded.
+
 **Stop after each milestone for review if running in an interactive Codex session.** Do not implement the whole roadmap in one unreviewed pass.
 
 ## 15. Test plan and acceptance matrix
@@ -531,7 +543,7 @@ These are fixture column names. Bind the validated query, permitted project ID (
 4. Run migrations/indexing through the documented CLI.
 5. Test local search before connecting any AI host.
 6. Register the built MCP server as a local `stdio` command in a supported host.
-7. Re-run `index` when notes change (manual MVP; scheduling/watch mode deferred).
+7. Re-run `index` when notes change, or keep `watch` running (Milestone 5) to refresh the index automatically.
 
 **No deployment requirement:** The host starts the MCP server as a local child process. No domain, VPS, Docker, reverse proxy, or cloud database is needed. A packaged npm CLI may be considered after the MVP is stable.
 
@@ -545,7 +557,7 @@ For an existing installation, create a separate Turso index file. Reindex approv
 2. **Hybrid retrieval:** Add embeddings and vector search only after collecting retrieval quality failures that keyword search cannot solve. Evaluate exact cosine similarity in the embedded engine against scoped retrieval quality and latency. Verify any approximate index on the selected driver before relying on it.
 3. **Skills-aware retrieval:** Index selected `SKILL.md` metadata and provide explicit skill selection. Skills are operational instructions and must be reviewed before being elevated to agent guidance.
 4. **Automatic project detection:** Safely map a verified repository path to a configured project scope, with manual override.
-5. **Incremental watcher:** Debounced file watching with recovery and periodic reconciliation.
+5. **Incremental watcher:** Debounced file watching with recovery and periodic reconciliation. Delivered as Milestone 5.
 6. **Retrieval diagnostics:** Local dashboard, query evaluation corpus, and retrieval metrics.
 7. **Packaging:** npm-distributed executable with documented updates and cross-platform installation.
 8. **Remote MCP transport:** Only if there is a concrete need; requires separate authentication, authorization, and threat modeling.
@@ -556,7 +568,7 @@ For an existing installation, create a separate Turso index file. Reindex approv
 - **First MCP host:** Recommend Codex or Claude Code for initial verification; T3 Code integration requires checking current support.
 - **Selected knowledge folders:** Must be explicitly approved before indexing.
 - **Initial project scope:** `groceryos` is illustrative; no actual notes are assumed to exist.
-- **Index refresh:** Manual CLI in MVP, not automatic synchronization.
+- **Index refresh:** Manual CLI in MVP. Milestone 5 adds the optional `watch` command. Starting it at logon is left to the operator.
 - **Embedding model:** Not selected because vector retrieval is deferred.
 
 ## 19. Definition of done (MVP)

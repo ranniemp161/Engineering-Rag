@@ -144,9 +144,19 @@ export async function indexNotes(
   db: Database,
   config: Config,
   rebuild: boolean,
+  scopeIds?: ReadonlySet<string>,
 ) {
   const scan = (tx: Transaction, scope: Config["scopes"][number]) =>
     scanScope(tx, scope, config.exclude);
+  if (scopeIds && rebuild)
+    throw new Error("Rebuild always replaces every configured scope");
+  if (scopeIds) {
+    const result = [];
+    for (const scope of config.scopes)
+      if (scopeIds.has(scope.id))
+        result.push(await db.transactionAsync(scan)(scope));
+    return result;
+  }
   if (rebuild)
     return db.transactionAsync(async (tx) => {
       await tx.exec("DELETE FROM scopes");
