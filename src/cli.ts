@@ -11,15 +11,30 @@ try {
   const [command, ...rest] = args;
   if (
     (command !== "search" && args.length !== 1) ||
-    !["index", "rebuild", "status","search"].includes(command ?? "")
+    !["index", "rebuild", "status", "search"].includes(command ?? "")
   )
-    throw new Error('Usage: pnpm dev -- index|status|rebuild or search "keywords" [--project ID] [--limit N] [--json]');
+    throw new Error(
+      'Usage: pnpm dev -- index|status|rebuild or search "keywords" [--project ID] [--limit N] [--json]',
+    );
   const config = await loadConfig(undefined, { allowUnavailableRoots: true });
-  if(command==="search"){
-    const {positionals,values}=parseArgs({args:rest,allowPositionals:true,options:{project:{type:"string"},limit:{type:"string"},json:{type:"boolean"}}});
-    if(positionals.length!==1) throw new Error("Supply one search query, quoting multiple words");
-    const output=await searchKnowledge(config,{query:positionals[0],projectId:values.project,limit:values.limit===undefined?undefined:Number(values.limit)});
-    console.log(JSON.stringify(output,null,2));
+  if (command === "search") {
+    const { positionals, values } = parseArgs({
+      args: rest,
+      allowPositionals: true,
+      options: {
+        project: { type: "string" },
+        limit: { type: "string" },
+        json: { type: "boolean" },
+      },
+    });
+    if (positionals.length !== 1)
+      throw new Error("Supply one search query, quoting multiple words");
+    const output = await searchKnowledge(config, {
+      query: positionals[0],
+      projectId: values.project,
+      limit: values.limit === undefined ? undefined : Number(values.limit),
+    });
+    console.log(JSON.stringify(output, null, 2));
   } else if (
     command === "status" &&
     !(await stat(config.databasePath).catch((error: NodeJS.ErrnoException) => {

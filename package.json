@@ -16,6 +16,7 @@
     "dev": "node src/cli.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@tursodatabase/database": "0.8.4",
     "fs-native-extensions": "1.5.4",
     "yaml": "2.9.1",

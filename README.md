@@ -42,4 +42,32 @@ After building, use `node dist/cli.js` with the same command. Each command print
 
 The local database directory must be writable for the persistent sibling guard file. Concurrent commands wait up to one second to acquire the guard, then report `INDEX_BUSY` so the caller can retry.
 
+## Search indexed notes
+
+```sh
+pnpm dev -- search "offline inventory"
+pnpm dev -- search "offline inventory" --project example-project --limit 3 --json
+```
+
+Use a configured project ID. Omitting `--project` searches shared notes only. Supplying it includes that project and shared notes. The search reads the most recent indexed content. Run `index` after changing notes.
+
+Search accepts up to 512 UTF-16 code units. It treats Unicode words and numbers as literal keywords, splits at punctuation, and matches any of the terms. Turso ranks the matching passages. Ties use the stable document ID and chunk ordinal. Results include verbatim snippets from the indexed text with normalized line endings, relative paths, and one-based inclusive line ranges.
+
+Output is JSON by default, including when `--json` is supplied. An empty `results` array means the search succeeded with no eligible matches. Invalid input and missing indexes produce diagnostics on stderr with exit code 1. After building, `node dist/cli.js search` accepts the same arguments.
+
+## Local MCP server
+
+Build with `pnpm build`. The stdio launch command from the project root is:
+
+```sh
+node dist/mcp/server.js
+```
+
+A client running from another directory can launch Node with an absolute path to the compiled server and set `ENGINEERING_INTELLIGENCE_CONFIG` to the absolute configuration file path. The client owns stdin and stdout. Server diagnostics go to stderr. Each tool call reloads the local configuration and opens a fresh guarded read-only index connection.
+
+- `search_engineering_knowledge` accepts `query`, optional `projectId`, and optional `limit`. It returns the same ranked JSON payload as the CLI inside an MCP text content block.
+- `get_document` accepts the indexed `documentId` returned by search and the same optional `projectId`. Set `startLine` (default 1) and `maxLines` (default 100, maximum 200). The response includes title, scope, relative path, inclusive line range and indexed source text with LF line endings. `nextStartLine` gives the next line, or null at the end. The text budget is 8,192 UTF-16 code units. If a single line exceeds that budget the server returns its prefix, sets `truncatedLine`, and resumes at the following line. The full JSON payload is capped at 64 KiB.
+
+Run `pnpm test` for an SDK client walkthrough against synthetic notes. The test discovers both tools, uses a returned ID to fetch a passage, and checks scope restrictions. [MCP integration test](tests/mcp.test.ts)
+
 The architecture, tool contracts, Windows locking decision, and milestone acceptance criteria are in the [engineering specification](ENGINEERING_INTELLIGENCE_SPEC.md).

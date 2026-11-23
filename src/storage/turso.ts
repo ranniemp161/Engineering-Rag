@@ -4,6 +4,8 @@ import { lstat, mkdir, open } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
+export class IndexBusyError extends Error {}
+
 export async function withIndex<T>(
   file: string,
   readonly: boolean,
@@ -24,7 +26,7 @@ export async function withIndex<T>(
     const deadline = performance.now() + 1000;
     while (!fsx.tryLock(guard.fd)) {
       if (performance.now() >= deadline)
-        throw new Error(
+        throw new IndexBusyError(
           "INDEX_BUSY: retry after the active index operation finishes",
         );
       await delay(20);
