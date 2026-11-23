@@ -45,3 +45,17 @@ The Windows x64 benchmark used Node 24.22.3 and 1,000 generated Markdown files, 
 Pinned the official MCP TypeScript SDK at 1.32.2 and added a local stdio server. Search reuses the CLI service. Document retrieval queries the indexed source snapshot by stable document ID and permitted scope, returns an inclusive line citation, and caps the line count, text length, and JSON payload size. Both tools reload operator configuration on each call and share root checks and the read-only OS guard. [Server](../src/mcp/server.ts) · [Scoped index access](../src/retrieval/scoped-index.ts) · [Document reader](../src/retrieval/get-document.ts) · [Launch and response format](../README.md)
 
 On Windows x64 with Node 24.22.3, an SDK client launched the server as a subprocess. It listed and invoked both tools, fetched source text by a search result ID, and verified default shared scope, project isolation, missing indexes, invalid paths and ranges, oversized lines, lock contention, reindex freshness and revocation of a configured project. The client reported zero protocol errors and the successful test run produced no server diagnostics. The frozen install, build, typecheck, lint, and all nine tests passed. Repeating the protocol suite with `TEST_COMPILED_MCP=1` and `node --test tests/mcp.test.ts` passed against the built server. A coding-host demonstration is pending for Milestone 4. [Integration test](../tests/mcp.test.ts)
+
+### Completed Milestone 4
+
+After a frozen install and build, `node dist/cli.js index` indexed one synthetic project note. Codex CLI 0.171.0 launched the compiled MCP server with Node 24.22.3 using temporary per-run settings. Its JSON events recorded successful `search_engineering_knowledge` and `get_document` calls in that order. The final answer correctly cited line 3 of `decisions/offline-retries.md` for local queuing and line 4 for the 47-second retry. The host exited successfully. Typecheck, lint, and all nine tests also passed.
+
+Added a verified host configuration and repeatable fixture exercise, linked them from the README, and updated the project status. The fixture satisfied host acceptance without accessing an operator vault. Real-note onboarding remains optional. [Host walkthrough](CODEX_HOST.md) · [Status](STATUS.md)
+
+### Indexed the first real project
+
+Configured the operator-approved GroceryOS repository as a project scope in the ignored local configuration, with an empty shared folder. Dependency directories, build output and tool caches were excluded. `pnpm config:check` passed. The local CLI indexed 53 Markdown files into 447 chunks without errors. A search for `inventory` returned a project passage whose cited lines were checked against the source file. The same query in shared scope returned zero results. A second index run skipped all 53 unchanged documents. [Current status](STATUS.md)
+
+### Verified GroceryOS retrieval in VS Code
+
+The operator's Codex chat screenshot showed Engineering search followed by document retrieval for a GroceryOS offline oversell question. Checked the answer against Decision 0020 line 5 and lines 14–16 in the source checkout. Both citations supported the claims. [Current status](STATUS.md)

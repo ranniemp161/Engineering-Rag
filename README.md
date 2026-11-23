@@ -70,4 +70,6 @@ A client running from another directory can launch Node with an absolute path to
 
 Run `pnpm test` for an SDK client walkthrough against synthetic notes. The test discovers both tools, uses a returned ID to fetch a passage, and checks scope restrictions. [MCP integration test](tests/mcp.test.ts)
 
+For the verified Codex CLI setup, including a host configuration example and a four-line retrieval exercise, see [Run the local index with Codex CLI](docs/CODEX_HOST.md).
+
 The architecture, tool contracts, Windows locking decision, and milestone acceptance criteria are in the [engineering specification](ENGINEERING_INTELLIGENCE_SPEC.md).
