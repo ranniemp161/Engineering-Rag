@@ -8,6 +8,7 @@ import {
   type ScanError,
 } from "../filesystem/markdown-reader.ts";
 import { parseMarkdown } from "../markdown/chunk-markdown.ts";
+import { writeReferences } from "../storage/turso.ts";
 
 async function scanScope(
   tx: Transaction,
@@ -83,6 +84,7 @@ async function scanScope(
       new Date().toISOString(),
       source,
     );
+    await writeReferences(tx, id, source);
     await tx.run("DELETE FROM chunks WHERE document_id=?", id);
     for (const [ordinal, chunk] of parsed.chunks.entries())
       await insert.run(

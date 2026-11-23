@@ -13,9 +13,13 @@ const schema = z.strictObject({
         displayName: text,
         type: z.enum(["shared", "project"]),
         rootPath: text,
+        // Code checkouts whose working directory selects this project (MCP detection).
+        repositories: z.array(text).max(20).optional(),
       }),
     )
     .min(1),
+  // When true, MCP calls without projectId use the project of the host's workspace.
+  detectProject: z.boolean().default(false),
   exclude: z
     .array(text)
     .default([
@@ -153,6 +157,17 @@ export async function loadConfig(
       throw new Error(`Overlapping scope roots at ${scope.rootPath}`);
     }
     roots.push(scope.rootPath);
+    if (scope.repositories) {
+      if (scope.type !== "project")
+        throw new Error("Only project scopes may list repositories");
+      // Repositories are only compared with working directories, never read.
+      scope.repositories = await Promise.all(
+        scope.repositories.map(async (repository) => {
+          const resolved = localPath(base, repository, "repositories");
+          return realpath(resolved).catch(() => resolved);
+        }),
+      );
+    }
   }
 
   try {

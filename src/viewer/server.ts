@@ -12,6 +12,7 @@ import {
 } from "../evaluation/evaluate.ts";
 import { indexStatus } from "../indexing/index-service.ts";
 import { getDocument } from "../retrieval/get-document.ts";
+import { getRelatedDocuments } from "../retrieval/related.ts";
 import { searchKnowledge } from "../retrieval/search-service.ts";
 import { withIndex } from "../storage/turso.ts";
 import { PAGE } from "./page.ts";
@@ -72,6 +73,12 @@ async function api(route: string, query: URLSearchParams) {
       comparison: baseline ? compareReports(baseline, report) : undefined,
     };
   }
+  if (route === "/api/related")
+    return getRelatedDocuments(config, {
+      documentId: query.get("id") ?? "",
+      projectId,
+      limit: 50,
+    });
   if (route === "/api/doc")
     return getDocument(config, {
       documentId: query.get("id") ?? "",

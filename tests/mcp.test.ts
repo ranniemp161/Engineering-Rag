@@ -64,6 +64,7 @@ test("stdio client discovers both tools and reads bounded, scoped indexed eviden
     const { tools } = await client.listTools();
     assert.deepEqual(tools.map((tool) => tool.name).sort(), [
       "get_document",
+      "get_related_documents",
       "search_engineering_knowledge",
     ]);
     const call = async (

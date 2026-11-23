@@ -1,4 +1,5 @@
 import { connect, type Database } from "@tursodatabase/database";
+import { extractReferences } from "../markdown/references.ts";
 import fsx from "fs-native-extensions";
 import { lstat, mkdir, open } from "node:fs/promises";
 import path from "node:path";
@@ -51,9 +52,32 @@ const EMBEDDINGS = `
   CREATE TABLE chunk_embeddings(chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
     model TEXT NOT NULL, embedding BLOB NOT NULL);`;
 
+// Version 3 adds explicit references between notes, resolved at query time.
+const REFERENCES = `
+  CREATE TABLE document_references(id INTEGER PRIMARY KEY,
+    document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    line INTEGER NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL);
+  CREATE INDEX document_references_document ON document_references(document_id);`;
+
+export const SCHEMA_VERSION = 3;
+
+export async function writeReferences(
+  tx: Pick<Database, "run" | "prepare">,
+  documentId: string,
+  source: string,
+) {
+  await tx.run("DELETE FROM document_references WHERE document_id=?", documentId);
+  const insert = await tx.prepare(
+    "INSERT INTO document_references(document_id,line,kind,target) VALUES(?,?,?,?)",
+  );
+  for (const r of extractReferences(source))
+    await insert.run(documentId, r.line, r.kind, r.target);
+}
+
 /**
  * Creates or upgrades the index schema and returns its version. A read-only
- * connection accepts version 1, which simply has no embeddings to search.
+ * connection accepts older versions; features they lack report that the
+ * index needs a write to upgrade.
  */
 export async function migrate(db: Database, readonly: boolean): Promise<number> {
   const tables = await db.all(
@@ -63,20 +87,25 @@ export async function migrate(db: Database, readonly: boolean): Promise<number> 
     const version = (
       await db.get("SELECT version FROM engineering_index_version")
     )?.version;
-    if (version === 2 || (version === 1 && readonly)) return version;
-    if (version !== 1) throw new Error("Unsupported engineering index schema");
+    if (![1, 2, SCHEMA_VERSION].includes(version))
+      throw new Error("Unsupported engineering index schema");
+    if (version === SCHEMA_VERSION || readonly) return version;
     await db.transactionAsync(async (tx) => {
-      await tx.exec(EMBEDDINGS);
-      await tx.exec("UPDATE engineering_index_version SET version = 2");
+      if (version < 2) await tx.exec(EMBEDDINGS);
+      // Existing notes are unchanged by hash, so backfill their references here.
+      await tx.exec(REFERENCES);
+      for (const row of await tx.all("SELECT id, source_text FROM documents"))
+        await writeReferences(tx, row.id, row.source_text);
+      await tx.exec(`UPDATE engineering_index_version SET version = ${SCHEMA_VERSION}`);
     })();
-    return 2;
+    return SCHEMA_VERSION;
   }
   if (tables.length || readonly)
     throw new Error("Expected an Engineering Intelligence index");
   await db.transactionAsync(async (tx) => {
     await tx.exec(`
       CREATE TABLE engineering_index_version(version INTEGER NOT NULL);
-      INSERT INTO engineering_index_version VALUES (2);
+      INSERT INTO engineering_index_version VALUES (${SCHEMA_VERSION});
       CREATE TABLE scopes(id TEXT PRIMARY KEY, display_name TEXT NOT NULL, root_path TEXT NOT NULL, scope_type TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE documents(id TEXT PRIMARY KEY, scope_id TEXT NOT NULL REFERENCES scopes(id) ON DELETE CASCADE,
         relative_path TEXT NOT NULL, title TEXT NOT NULL, tags TEXT NOT NULL, content_hash TEXT NOT NULL,
@@ -92,7 +121,8 @@ export async function migrate(db: Database, readonly: boolean): Promise<number> 
       CREATE TABLE index_errors(id INTEGER PRIMARY KEY, run_id TEXT NOT NULL REFERENCES index_runs(id) ON DELETE CASCADE,
         relative_path TEXT NOT NULL, code TEXT NOT NULL, message TEXT NOT NULL);
       ${EMBEDDINGS}
+      ${REFERENCES}
     `);
   })();
-  return 2;
+  return SCHEMA_VERSION;
 }

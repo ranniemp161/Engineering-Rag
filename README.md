@@ -146,6 +146,23 @@ A client running from another directory can launch Node with an absolute path to
 - `search_engineering_knowledge` accepts `query`, optional `projectId`, and optional `limit`. It returns the same ranked JSON payload as the CLI inside an MCP text content block.
 - `get_document` accepts the indexed `documentId` returned by search and the same optional `projectId`. Set `startLine` (default 1) and `maxLines` (default 100, maximum 200). The response includes title, scope, relative path, inclusive line range and indexed source text with LF line endings. `nextStartLine` gives the next line, or null at the end. The text budget is 8,192 UTF-16 code units. If a single line exceeds that budget the server returns its prefix, sets `truncatedLine`, and resumes at the following line. The full JSON payload is capped at 64 KiB.
 
+- `get_related_documents` accepts a `documentId`, the same optional `projectId`, and an optional `limit` (default 20, maximum 50). It returns the notes the document links to (`outgoing`) and the notes that link to it (`incoming`), with totals. Each entry cites up to five referencing lines with their text. Links come only from explicit references:
+  - Markdown links to `.md` files;
+  - wikilinks such as `[[Note]]`, `[[folder/Note]]` and `[[Note#Heading|alias]]`;
+  - numbered references such as `0020` or `decision 0021`, which resolve to a file whose name starts with that number, such as `0020-title.md`, in the same scope.
+
+  Dates, versions and references inside code fences are ignored. Ambiguous or unresolved references are omitted. References are resolved when requested, so a note created later is linked without rescanning older notes. After a build, `node dist/cli.js related DOCUMENT_ID --project ID` prints the same result, and the viewer lists both directions under each document's title.
+
+### Automatic project detection
+
+Set `"detectProject": true` in the configuration to make MCP calls without `projectId` use the project of the host's workspace. The server asks the host for its MCP roots (workspace folders) and falls back to the directory it was launched from. A folder selects a project when it lies inside that project's `rootPath` or a path listed in the scope's optional `repositories`. List a repository when its notes live elsewhere, for example in an Obsidian vault:
+
+```json
+{ "id": "groceryos", "type": "project", "rootPath": "E:/Vault/GroceryOS", "repositories": ["D:/Projects/GroceryOS"] }
+```
+
+If folders match several projects, or none, the call keeps the shared-only default. An explicit `projectId` always wins. Responses include `detectedProjectId` when detection chose the project. Detection is off by default.
+
 Run `pnpm test` for an SDK client walkthrough against synthetic notes. The test discovers both tools, uses a returned ID to fetch a passage, and checks scope restrictions. [MCP integration test](tests/mcp.test.ts)
 
 For the verified Codex CLI setup, including a host configuration example and a four-line retrieval exercise, see [Run the local index with Codex CLI](docs/CODEX_HOST.md).

@@ -537,6 +537,30 @@ Started on 2026-11-24. It implements future extension 2. The Milestone 6 baselin
 - Add `--mode keyword|hybrid` to `search` and `eval`, record mode and model in evaluation reports, and report vectors per scope and model in `status`.
 - **Exit:** Offline fixture tests with a deterministic embedder cover fusion, paraphrase retrieval, scope isolation, incremental and model-change re-embedding, schema upgrade and fallback, mode comparison, configuration validation and the offline failure path. On the approved real scope, hybrid retrieval improves paraphrase hit@5 over the keyword baseline with no keyword case leaving the top 5.
 
+### Milestone 8 — Explicit note links and project detection (post-MVP)
+
+Started on 2026-11-24. It implements future extension 4 (automatic project detection) and adds a link graph from explicit references only. LLM-built knowledge graphs (GraphRAG) were considered and rejected for now: the evaluation shows no failing global or multi-hop questions, agents already chain searches, and extracting a graph with an LLM would send every note to a provider and break offline, rebuildable indexing.
+
+- Extract references while indexing:
+  - Markdown links to `.md` files, including link text that wraps across lines.
+  - Wikilinks, including headings, aliases and embeds of notes.
+  - Numbered references (3–6 digits) such as `0020`, excluding dates, versions, paths and identifiers.
+  - References inside fenced code are skipped.
+- Store references per document in schema version 3 (`document_references`, cascading with documents). Older indexes stay readable and backfill references from stored source text on the next write. Resolve references at query time, so a note added later resolves without rescanning the notes that link to it.
+- Resolve paths and numbers within the citing document's scope; wikilink names may also resolve to shared notes. Drop ambiguous, unresolved and self references. Resolve only against the scopes the request may see.
+- Add the read-only MCP tool `get_related_documents(documentId, projectId?, limit?)`, which returns outgoing and incoming related documents with the citing lines. Add the matching `related` CLI command and viewer links. Existing tool contracts are unchanged.
+- Add optional project detection (`detectProject`, default false) with optional `repositories` per project scope. When a tool call omits `projectId`, the server maps the host's MCP roots, or its launch directory when roots are unavailable, to exactly one project root or repository. Ambiguous or unmatched workspaces keep the shared-only default. An explicit `projectId` always wins, and responses name a detected project in `detectedProjectId`.
+- **Exit:** Fixture tests cover:
+  - extraction edge cases;
+  - resolution in both directions;
+  - scope isolation, including identical numbers in another project;
+  - query-time resolution of notes added later;
+  - the schema upgrade and backfill;
+  - detection through roots, the launch directory and ambiguous workspaces;
+  - explicit overrides, against the source and the compiled server.
+
+  Links for an approved real scope are checked by hand.
+
 **Stop after each milestone for review if running in an interactive Codex session.** Do not implement the whole roadmap in one unreviewed pass.
 
 ## 15. Test plan and acceptance matrix
@@ -579,7 +603,7 @@ For an existing installation, create a separate Turso index file. Reindex approv
 1. **Graphify adapter:** Retrieve symbol dependencies and code impact information from an installed Graphify instance, after verifying its actual APIs and version. Do not assume its MCP tool names or schemas.
 2. **Hybrid retrieval:** Add embeddings and vector search only after collecting retrieval quality failures that keyword search cannot solve. Evaluate exact cosine similarity in the embedded engine against scoped retrieval quality and latency. Verify any approximate index on the selected driver before relying on it. Delivered as Milestone 7 with exact cosine search. Turso 0.8.4 rejected the `libsql_vector_idx` index syntax, so no approximate index is used.
 3. **Skills-aware retrieval:** Index selected `SKILL.md` metadata and provide explicit skill selection. Skills are operational instructions and must be reviewed before being elevated to agent guidance.
-4. **Automatic project detection:** Safely map a verified repository path to a configured project scope, with manual override.
+4. **Automatic project detection:** Safely map a verified repository path to a configured project scope, with manual override. Delivered as Milestone 8.
 5. **Incremental watcher:** Debounced file watching with recovery and periodic reconciliation. Delivered as Milestone 5.
 6. **Retrieval diagnostics:** Local dashboard, query evaluation corpus, and retrieval metrics. The corpus, metrics and viewer report were delivered as Milestone 6.
 7. **Packaging:** npm-distributed executable with documented updates and cross-platform installation.

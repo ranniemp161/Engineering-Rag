@@ -40,6 +40,7 @@ tr.case{cursor:pointer}tr.case:hover{background:var(--panel)}
 .rank{display:inline-block;min-width:28px;text-align:center;border-radius:4px;padding:0 6px;font-weight:600}
 .r1{background:#2e8b5733;color:#2e8b57}.r5{background:#d4a01733;color:#b8860b}.rx{background:#c0392b26;color:#c0392b}
 h3{font-size:14px;margin:18px 0 6px}
+.links a{color:var(--accent);text-decoration:none}.links a:hover{text-decoration:underline}.links b{color:var(--text);font-weight:600}
 @media (max-width:760px){main{grid-template-columns:1fr;height:auto}aside{max-height:45vh}}
 </style></head><body>
 <header><h1>Engineering Index <span>local viewer</span></h1><div class="stats" id="stats"></div>
@@ -60,12 +61,17 @@ function render(){$('#tDocs').className=tab==='docs'?'on':'';$('#tRes').classNam
 async function openDoc(id,project,start,hl){active=id;render();const v=$('#view');
  try{const p=new URLSearchParams({id,start});if(project)p.set('project',project);const d=await get('/api/doc?'+p);v.replaceChildren();
   v.append(el('h2',null,d.title));const m=el('div','meta');m.append(el('span','badge',d.scope),el('code',null,d.relativePath),' · lines '+d.startLine+'–'+d.endLine);v.append(m);
+  const links=el('div','links');v.append(links);related(id,project,links);
   const pre=el('pre');d.text.replace(/\\n$/,'').split('\\n').forEach((line,i)=>{const n=d.startLine+i,row=el('div','ln'+(hl&&n>=hl[0]&&n<=hl[1]?' hl':''));row.append(el('i',null,n),el('span',null,line||' '));pre.append(row)});v.append(pre);
   if(d.nextStartLine){const b=el('button','more','Next 200 lines');b.onclick=()=>openDoc(id,project,d.nextStartLine,hl);v.append(b)}
   const h=v.querySelector('.hl');if(h)h.scrollIntoView({block:'center'});else v.scrollTop=0}
  catch(e){v.replaceChildren(el('div','err',e.message))}}
 $('#f').onsubmit=async e=>{e.preventDefault();const q=$('#q').value.trim();if(!q)return;const p=new URLSearchParams({q});if($('#proj').value)p.set('project',$('#proj').value);
  try{results=(await get('/api/search?'+p)).results;tab='res';render()}catch(err){$('#list').replaceChildren(el('div','err',err.message))}};
+async function related(id,project,box){try{const p=new URLSearchParams({id});if(project)p.set('project',project);const r=await get('/api/related?'+p);
+ for(const [label,list,total] of [['Links to',r.outgoing,r.outgoingTotal],['Linked from',r.incoming,r.incomingTotal]]){if(!list.length)continue;const row=el('div','meta');row.append(el('b',null,label+' ('+total+'): '));
+  list.forEach((x,i)=>{const a=el('a',null,x.title);a.href='#';a.title=x.relativePath+'\\n'+x.references.map(c=>'line '+c.line+': '+c.context).join('\\n');a.onclick=e=>{e.preventDefault();openDoc(x.documentId,project,1)};if(i)row.append(' · ');row.append(a)});box.append(row)}}
+ catch(e){box.append(el('div','meta',e.message))}}
 const pct=x=>(x*100).toFixed(0)+'%';
 function cell(row,text,cls){const td=el('td',cls,text);row.append(td);return td}
 function summaryTable(title,groups){if(!Object.keys(groups).length)return[];const t=el('table'),h=el('tr');

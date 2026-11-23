@@ -202,6 +202,7 @@ test("schema 1 indexes stay searchable read-only and upgrade on the next write",
   await index(fake.embedder);
   await withIndex(config.databasePath, false, async (db) => {
     await db.exec("DROP TABLE chunk_embeddings");
+    await db.exec("DROP TABLE document_references");
     await db.exec("UPDATE engineering_index_version SET version = 1");
   });
   // Default mode falls back to keywords; an explicit hybrid request reports why.
@@ -218,7 +219,7 @@ test("schema 1 indexes stay searchable read-only and upgrade on the next write",
   const version = await withIndex(config.databasePath, true, (db) =>
     db.get("SELECT version FROM engineering_index_version"),
   );
-  assert.equal(version?.version, 2);
+  assert.equal(version?.version, 3);
   assert.equal(
     (await search("undo purchases", fake.embedder, { projectId: "pilot" }))[0],
     "pilot:reversal.md",

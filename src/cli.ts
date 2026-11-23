@@ -11,6 +11,7 @@ import {
   runEvaluation,
 } from "./evaluation/evaluate.ts";
 import { parseArgs } from "node:util";
+import { getRelatedDocuments } from "./retrieval/related.ts";
 import { searchKnowledge } from "./retrieval/search-service.ts";
 import { embedPending } from "./semantic/embed-index.ts";
 import {
@@ -30,7 +31,7 @@ try {
   if (args[0] === "--") args.shift();
   const [command, ...rest] = args;
   if (
-    (!["search", "watch", "eval"].includes(command ?? "") &&
+    (!["search", "watch", "eval", "related"].includes(command ?? "") &&
       args.length !== 1) ||
     ![
       "index",
@@ -40,13 +41,28 @@ try {
       "watch",
       "eval",
       "fetch-model",
+      "related",
     ].includes(command ?? "")
   )
     throw new Error(
-      'Usage: pnpm dev -- index|status|rebuild|fetch-model, search "keywords" [--project ID] [--limit N] [--mode keyword|hybrid] [--json], watch [--debounce MS] [--reconcile MINUTES], or eval [--file CASES] [--baseline REPORT] [--output REPORT] [--mode keyword|hybrid]',
+      'Usage: pnpm dev -- index|status|rebuild|fetch-model, search "keywords" [--project ID] [--limit N] [--mode keyword|hybrid] [--json], related DOCUMENT_ID [--project ID] [--limit N], watch [--debounce MS] [--reconcile MINUTES], or eval [--file CASES] [--baseline REPORT] [--output REPORT] [--mode keyword|hybrid]',
     );
   const config = await loadConfig(undefined, { allowUnavailableRoots: true });
-  if (command === "fetch-model") {
+  if (command === "related") {
+    const { positionals, values } = parseArgs({
+      args: rest,
+      allowPositionals: true,
+      options: { project: { type: "string" }, limit: { type: "string" } },
+    });
+    if (positionals.length !== 1)
+      throw new Error("Supply one document ID from a search result");
+    const output = await getRelatedDocuments(config, {
+      documentId: positionals[0],
+      projectId: values.project,
+      limit: values.limit === undefined ? undefined : Number(values.limit),
+    });
+    console.log(JSON.stringify(output, null, 2));
+  } else if (command === "fetch-model") {
     if (!config.semantic)
       throw new Error('Add a "semantic" section to the configuration first');
     console.log(JSON.stringify(await fetchModel(config.semantic), null, 2));

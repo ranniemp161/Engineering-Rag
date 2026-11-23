@@ -138,3 +138,36 @@ Results:
 - An SDK client called the built MCP server with the operator configuration. Hybrid results had fused scores and the server wrote nothing to stderr. The first call, including the model load, took 623 ms; the second took 52 ms.
 
 Typecheck, lint, build and all 20 tests passed. The coding host's running MCP server still uses the earlier build until it is restarted.
+
+### Completed Milestone 8: explicit note links and project detection
+
+Asked whether GraphRAG was needed, the answer was not yet, and an explicit link graph was proposed instead. Recorded the rationale in the Milestone 8 specification.
+
+**Links.** Added `extractReferences`, covering:
+- Markdown links to `.md` files, including link text that wraps across lines;
+- wikilinks with headings, aliases and embeds;
+- 3–6-digit numbered references, with boundaries that exclude dates, versions, paths and identifiers;
+- skipping of fenced code.
+
+Schema version 3 stores the references in `document_references`. Upgrading from version 1 or 2 creates the table and backfills references from stored source text, because unchanged notes are skipped by hash. `getRelatedDocuments` resolves references at query time against the scopes visible to the request:
+- paths and numbers resolve in the citing document's scope;
+- wikilink names may also resolve to shared notes;
+- ambiguous, unresolved and self references are dropped.
+
+New surfaces: the MCP tool `get_related_documents`, the `related` CLI command, and viewer links under each document title.
+
+**Detection.** Added an optional `detectProject` setting and per-project `repositories`. For calls without a `projectId`, the server uses MCP roots, falling back to its launch directory. Exactly one matching project is applied and reported as `detectedProjectId`; otherwise the shared default holds, and an explicit `projectId` always wins.
+
+Files: `src/markdown/references.ts`, `src/retrieval/related.ts`, `src/mcp/project-detection.ts`, `src/mcp/server.ts`, `src/storage/turso.ts`, `src/indexing/index-service.ts`, `src/config/load-config.ts`, `src/cli.ts`, `src/viewer/server.ts`, `src/viewer/page.ts`, `tests/links.test.ts`, `tests/mcp.test.ts`, `tests/semantic.test.ts`, README and specification.
+
+A first test run hung. Hooks registered with `t.after` run in registration order, so the fixture deleted its folder while MCP server processes still used it (`EBUSY`), and those clients were never closed. The MCP detection test now closes its clients inside the test body.
+
+**Real data.** Upgrading the GroceryOS index to version 3 backfilled 29 link and 790 number references. Spot checks:
+- Decision 0020 links out to 0002 ("Decision `0002` blocks local sales…") and is cited by 12 notes, including `AGENTS.md`, `PHASE-2-PLAN.md` line 108 and decisions 0025 and 0027.
+- Decision 0002 shows "amended by 0020".
+
+Every sampled reference was a genuine decision mention. Enabled `detectProject` in the local configuration. `D:/Projects/GroceryOS` and its subfolders map to `groceryos`, and this repository maps to shared only.
+
+**Checks** (Node 26.12.1): typecheck, lint, build and all 25 tests passed. The MCP and link tests also passed against the compiled server (`TEST_COMPILED_MCP=1`).
+
+**Not yet verified:** whether the coding host sends MCP roots or launches the server in the workspace directory has not been checked in a GroceryOS window.
