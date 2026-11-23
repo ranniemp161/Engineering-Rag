@@ -171,3 +171,35 @@ Every sampled reference was a genuine decision mention. Enabled `detectProject` 
 **Checks** (Node 26.12.1): typecheck, lint, build and all 25 tests passed. The MCP and link tests also passed against the compiled server (`TEST_COMPILED_MCP=1`).
 
 **Not yet verified:** whether the coding host sends MCP roots or launches the server in the workspace directory has not been checked in a GroceryOS window.
+
+### Completed Milestone 9: Graphify code graph adapter
+
+**Verified Graphify before designing the adapter.**
+- graphifyy 0.9.97 is installed as a uv tool with the CLI on `PATH`.
+- `graphify update` extracts code with tree-sitter and needs no LLM. It completed with API keys removed.
+- By default it writes `graphify-out/` inside the scanned repository whatever the working directory. A probe on a three-file fixture added 11 files to the repository.
+- The source shows `GRAPHIFY_OUT` accepting an absolute path. With it set, the same probe changed nothing in the repository.
+- Recorded the `graph.json` node and link fields, and the relation set and member seeding of `affected` (from `graphify/affected.py`).
+
+**Added the adapter:**
+- per-project `codeGraph` configuration (repository, plus an output directory validated outside source roots and the repository);
+- `buildCodeGraph`, which runs `update --no-cluster` with `GRAPHIFY_OUT`, the working directory set to the output, and LLM keys removed;
+- a direct `graph.json` reader cached by modification time and size;
+- `searchCodeGraph` (identifier-split name matching, exact name first) and `getCodeImpact` (Graphify's relation set, member seeding, dependents or dependencies, call or import sites, confidence);
+- repository-relative paths only;
+- MCP tools `search_code_graph` and `get_code_impact`, and CLI commands `code-build`, `code-search` and `code-impact`.
+
+Files: `src/code/code-graph.ts`, `src/code/build-graph.ts`, `src/config/load-config.ts`, `src/mcp/server.ts`, `src/cli.ts`, `tests/code-graph.test.ts`, `tests/mcp.test.ts`, `tests/links.test.ts`, README and specification.
+
+**Real data.** Configured `codeGraph` for GroceryOS with output in the ignored `data/graphs/groceryos`.
+- `code-build` produced 3,792 nodes and 12,110 links in 28 s.
+- GroceryOS `git status` reported no changes, including ignored files, and no `graphify-out` directory was created.
+- The graph has no `node_modules` nodes and no absolute paths.
+- `code-search oversell` found `packages/domain/src/oversell.ts` and `coverOversell()`.
+- Impact of `coverOversell()`: 18 dependents, including the API `sale-posted.ts` handler (call at line 194), its unit test, and API tests that import the domain package.
+- File-level impact of `oversell.ts` reached 141 nodes at depth 2 through the domain barrel `index.ts`.
+- Through the built MCP server launched in GroceryOS, both tools detected `groceryos` without a `projectId`. Search took 71 ms including the graph load, impact 10 ms, and there was no stderr output.
+
+**Checks** (Node 26.12.1): typecheck, lint, build and all 28 tests passed. The MCP and link tests passed against the compiled server.
+
+**Not reproduced from Graphify:** method-override expansion, communities, and semantic document extraction. Code graphs are rebuilt by `code-build`, not by `watch`.

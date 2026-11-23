@@ -561,6 +561,33 @@ Started on 2026-11-24. It implements future extension 4 (automatic project detec
 
   Links for an approved real scope are checked by hand.
 
+### Milestone 9 — Graphify code graph adapter (post-MVP)
+
+Started on 2026-11-24. It implements future extension 1. The Graphify interfaces were verified against the installed version, not assumed:
+
+- **Version:** graphifyy 0.9.97, with the CLI at `~/.local/bin/graphify`.
+- **Extraction:** `graphify update <path>` extracts code structurally (tree-sitter) without an LLM.
+- **Output location:** by default it writes `graphify-out/` inside the scanned repository whatever the working directory, but the `GRAPHIFY_OUT` environment variable accepts an absolute path.
+- **`graph.json` format:** NetworkX node-link data.
+  - Nodes carry `id`, `label`, a repository-relative `source_file` and `source_location` such as `L12`.
+  - Links carry `source`, `target`, `relation`, `confidence` (`EXTRACTED` or `INFERRED`), `source_file` and `source_location`.
+- **Impact relations:** Graphify's `affected` command walks 15 dependency relations in reverse, to depth 2, seeded with the node's `method` and `contains` members.
+
+The adapter:
+
+- Add optional per-project `codeGraph` configuration with a `repository` (default: the first listed repository, else the note root) and an `output` directory outside source roots and the repository.
+- Add `code-build`, which runs `graphify update <repository> --no-cluster` with `GRAPHIFY_OUT` set to `output`, the working directory set to `output`, and LLM API keys removed from the environment. The repository is only read.
+- Read `graph.json` directly, cached by modification time and size, and expose two read-only MCP tools.
+  - `search_code_graph(query, projectId?, limit?)` matches names split on case and punctuation; an exact name ranks first.
+  - `get_code_impact(nodeId, projectId?, direction?, depth?, limit?)` uses Graphify's relation set: `dependents` reverse the edges and `dependencies` follow them, with members seeding the walk.
+
+  Each hit cites the edge's call or import site and its confidence. Paths are repository-relative, and an absolute path outside the repository is returned as `null`. Code tools need a project, explicit or detected.
+- Matching CLI commands: `code-search` and `code-impact`.
+- Not reproduced from Graphify: method-override expansion in `affected`, communities and LLM labels, and semantic document extraction. Graphs are not rebuilt by `watch`.
+- **Exit:** Fixture tests based on recorded Graphify output cover ranking, identifier splitting, path privacy, impact in both directions with member seeding and depth, malformed and missing graphs, scope errors, and configuration rejection of outputs inside source roots or the repository. The build step is tested with a substitute executable that records its arguments, working directory and environment, plus the failure paths.
+
+  A build for an approved real repository leaves its `git status` unchanged, and the MCP tools are exercised through the compiled server.
+
 **Stop after each milestone for review if running in an interactive Codex session.** Do not implement the whole roadmap in one unreviewed pass.
 
 ## 15. Test plan and acceptance matrix
@@ -600,7 +627,7 @@ For an existing installation, create a separate Turso index file. Reindex approv
 
 ## 17. Future extensions — explicitly out of scope
 
-1. **Graphify adapter:** Retrieve symbol dependencies and code impact information from an installed Graphify instance, after verifying its actual APIs and version. Do not assume its MCP tool names or schemas.
+1. **Graphify adapter:** Retrieve symbol dependencies and code impact information from an installed Graphify instance, after verifying its actual APIs and version. Do not assume its MCP tool names or schemas. Delivered as Milestone 9 against graphifyy 0.9.97.
 2. **Hybrid retrieval:** Add embeddings and vector search only after collecting retrieval quality failures that keyword search cannot solve. Evaluate exact cosine similarity in the embedded engine against scoped retrieval quality and latency. Verify any approximate index on the selected driver before relying on it. Delivered as Milestone 7 with exact cosine search. Turso 0.8.4 rejected the `libsql_vector_idx` index syntax, so no approximate index is used.
 3. **Skills-aware retrieval:** Index selected `SKILL.md` metadata and provide explicit skill selection. Skills are operational instructions and must be reviewed before being elevated to agent guidance.
 4. **Automatic project detection:** Safely map a verified repository path to a configured project scope, with manual override. Delivered as Milestone 8.

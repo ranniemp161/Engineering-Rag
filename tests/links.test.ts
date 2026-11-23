@@ -246,8 +246,10 @@ async function detectionChecks(
   clients.push(viaRoots.client);
   const { tools } = await viaRoots.client.listTools();
   assert.deepEqual(tools.map((tool) => tool.name).sort(), [
+    "get_code_impact",
     "get_document",
     "get_related_documents",
+    "search_code_graph",
     "search_engineering_knowledge",
   ]);
   const found = await viaRoots.call("search_engineering_knowledge", { query: "Plan" });

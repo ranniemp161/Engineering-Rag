@@ -2,6 +2,12 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import {
+  codeImpactInput,
+  codeSearchInput,
+  getCodeImpact,
+  searchCodeGraph,
+} from "../code/code-graph.ts";
 import { loadConfig, type Config } from "../config/load-config.ts";
 import { documentInput, getDocument } from "../retrieval/get-document.ts";
 import { getRelatedDocuments, relatedInput } from "../retrieval/related.ts";
@@ -105,6 +111,27 @@ server.registerTool(
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
   (input) => toolResult(input, (config, i) => getRelatedDocuments(config, i)),
+);
+
+server.registerTool(
+  "search_code_graph",
+  {
+    description:
+      "Find functions, methods, types and files in a project's Graphify code graph by name. Returns node IDs for get_code_impact, with repository-relative paths and lines. Needs a projectId (or a detected project).",
+    inputSchema: codeSearchInput,
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  (input) => toolResult(input, (config, i) => searchCodeGraph(config, i)),
+);
+server.registerTool(
+  "get_code_impact",
+  {
+    description:
+      "From a code graph node, list what depends on it (direction 'dependents', the default: callers, importers, subclasses — what a change can break) or what it depends on ('dependencies'), up to depth 4. Each hit cites the call or import site and whether Graphify extracted or inferred the edge.",
+    inputSchema: codeImpactInput,
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  (input) => toolResult(input, (config, i) => getCodeImpact(config, i)),
 );
 
 await server.connect(new StdioServerTransport());

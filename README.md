@@ -153,6 +153,30 @@ A client running from another directory can launch Node with an absolute path to
 
   Dates, versions and references inside code fences are ignored. Ambiguous or unresolved references are omitted. References are resolved when requested, so a note created later is linked without rescanning older notes. After a build, `node dist/cli.js related DOCUMENT_ID --project ID` prints the same result, and the viewer lists both directions under each document's title.
 
+### Code graph (Graphify)
+
+Code questions, such as "what calls this?" or "what breaks if I change it?", are answered from a [Graphify](https://pypi.org/project/graphifyy/) code graph, verified with graphifyy 0.9.97. Install Graphify (`uv tool install graphifyy`), then give a project scope a `codeGraph`:
+
+```json
+{ "id": "groceryos", "type": "project", "rootPath": "D:/Projects/GroceryOS", "codeGraph": { "output": "./data/graphs/groceryos" } }
+```
+
+`repository` defaults to the scope's first `repositories` entry, then its `rootPath`. `output` must lie outside every source root and the repository. Build or refresh the graph with:
+
+```sh
+pnpm dev -- code-build                 # every project with a codeGraph
+pnpm dev -- code-build --project groceryos
+```
+
+This runs `graphify update <repository> --no-cluster` with `GRAPHIFY_OUT` pointing at `output`. Graphify extracts code with tree-sitter and needs no LLM, and LLM API keys are removed from its environment. All files go to `output`, so the repository is only read. Set `GRAPHIFY_COMMAND` if the executable is not on `PATH`. Later builds reuse Graphify's cache. Rerun after code changes; `watch` does not rebuild code graphs.
+
+The MCP server adds two read-only tools. Both need a `projectId`, or a detected project.
+
+- `search_code_graph(query, projectId?, limit?)` finds functions, methods, types and files by name. Words are split on case and punctuation, so `apply sale` finds `applySale()`. Each result has a node ID, kind, repository-relative path, line and its dependent and dependency counts.
+- `get_code_impact(nodeId, projectId?, direction?, depth?, limit?)` walks the edges Graphify's own `affected` command uses: calls, imports, references, inheritance, `defines` and others. With `direction: "dependents"` (the default) it reports what depends on the node, which is what a change can break. With `"dependencies"` it reports what the node uses. A class's or file's own members seed the walk. Each hit cites the call or import site, its depth, relation, and whether Graphify extracted or inferred it. `depth` defaults to 2 (maximum 4) and `limit` to 50.
+
+`code-search` and `code-impact` print the same JSON from the CLI. File-level impact can widen quickly through barrel files that re-export many modules, so start from a function or type for a focused answer.
+
 ### Automatic project detection
 
 Set `"detectProject": true` in the configuration to make MCP calls without `projectId` use the project of the host's workspace. The server asks the host for its MCP roots (workspace folders) and falls back to the directory it was launched from. A folder selects a project when it lies inside that project's `rootPath` or a path listed in the scope's optional `repositories`. List a repository when its notes live elsewhere, for example in an Obsidian vault:

@@ -15,6 +15,10 @@ const schema = z.strictObject({
         rootPath: text,
         // Code checkouts whose working directory selects this project (MCP detection).
         repositories: z.array(text).max(20).optional(),
+        // Graphify code graph: the checkout it reads and the directory it writes.
+        codeGraph: z
+          .strictObject({ repository: text.optional(), output: text })
+          .optional(),
       }),
     )
     .min(1),
@@ -168,6 +172,31 @@ export async function loadConfig(
         }),
       );
     }
+  }
+  // Resolved after all roots are known so outputs can be checked against them.
+  for (const scope of config.scopes) {
+    if (!scope.codeGraph) continue;
+    if (scope.type !== "project")
+      throw new Error("Only project scopes may configure a code graph");
+    const graph = scope.codeGraph as { repository: string; output: string };
+    const repository = localPath(
+      base,
+      graph.repository ?? scope.repositories?.[0] ?? scope.rootPath,
+      "codeGraph.repository",
+    );
+    graph.repository = await realpath(repository).catch(() => repository);
+    const output = await canonicalDestination(
+      localPath(base, graph.output, "codeGraph.output"),
+    );
+    // Graphify writes here, so it must not be a source root or inside a checkout.
+    if (
+      roots.some((root) => contains(root, output) || contains(output, root)) ||
+      contains(graph.repository, output)
+    )
+      throw new Error(
+        `codeGraph.output for ${scope.id} must be outside source roots and the repository`,
+      );
+    graph.output = output;
   }
 
   try {

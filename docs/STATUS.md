@@ -1,8 +1,10 @@
 # Project status
 
-Updated 2026-11-24. **The MVP (Milestones 0–4) is complete. Post-MVP Milestones 5 (automatic refresh) and 6 (retrieval evaluation) are complete and awaiting review. Milestone 7 (hybrid retrieval) is complete. Milestone 8 (explicit note links and project detection) is complete and awaiting review.**
+Updated 2026-11-24. **The MVP (Milestones 0–4) is complete. Post-MVP Milestones 5 (automatic refresh) and 6 (retrieval evaluation) are complete and awaiting review. Milestone 7 (hybrid retrieval) is complete. Milestone 8 (explicit note links and project detection) is complete. Milestone 9 (Graphify code graph adapter) is complete and awaiting review. All future extensions in the specification except packaging and remote transport are now delivered.**
 
-`get_related_documents` lists the notes a document links to and the notes that link to it, from explicit links, wikilinks and decision numbers (index schema version 3). With `detectProject` enabled, MCP calls without `projectId` use the workspace's project. Next action: the operator restarts the coding host, then confirms detection from a window opened on GroceryOS. Remaining candidate: the Graphify code adapter. [Links and detection](../README.md#automatic-project-detection)
+`get_related_documents` lists the notes a document links to and the notes that link to it, from explicit links, wikilinks and decision numbers (index schema version 3). With `detectProject` enabled, MCP calls without `projectId` use the workspace's project. [Links and detection](../README.md#automatic-project-detection)
+
+`search_code_graph` and `get_code_impact` answer code questions from a Graphify graph built by `code-build` outside the repository. GroceryOS: 3,792 nodes, built in 28 s, with the repository unchanged. Next action: the operator restarts the coding host and confirms detection and the code tools from a window opened on GroceryOS, then reruns `code-build` after code changes. Remaining specification extensions are packaging (7) and remote MCP transport (8), both conditional on need. [Code graph](../README.md#code-graph-graphify)
 
 Hybrid retrieval is enabled for the local GroceryOS pilot: `bge-small-en-v1.5`, all 447 chunks embedded. Against the keyword baseline, overall hit@5 rose from 0.769 to 0.885 and MRR from 0.588 to 0.755, with no regressions. Two paraphrase cases remain weak (decision 0004 at rank 10, decision 0015 at rank 13), and `pa-tingi` dropped out of the top 20. [Hybrid retrieval](../README.md#hybrid-retrieval-optional) · [Progress](PROGRESS.md)
 

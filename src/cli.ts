@@ -1,3 +1,5 @@
+import { buildCodeGraph } from "./code/build-graph.ts";
+import { getCodeImpact, searchCodeGraph } from "./code/code-graph.ts";
 import { loadConfig } from "./config/load-config.ts";
 import { indexNotes, indexStatus } from "./indexing/index-service.ts";
 import { watchNotes } from "./indexing/watch-service.ts";
@@ -31,7 +33,15 @@ try {
   if (args[0] === "--") args.shift();
   const [command, ...rest] = args;
   if (
-    (!["search", "watch", "eval", "related"].includes(command ?? "") &&
+    (![
+      "search",
+      "watch",
+      "eval",
+      "related",
+      "code-build",
+      "code-search",
+      "code-impact",
+    ].includes(command ?? "") &&
       args.length !== 1) ||
     ![
       "index",
@@ -42,13 +52,60 @@ try {
       "eval",
       "fetch-model",
       "related",
+      "code-build",
+      "code-search",
+      "code-impact",
     ].includes(command ?? "")
   )
     throw new Error(
-      'Usage: pnpm dev -- index|status|rebuild|fetch-model, search "keywords" [--project ID] [--limit N] [--mode keyword|hybrid] [--json], related DOCUMENT_ID [--project ID] [--limit N], watch [--debounce MS] [--reconcile MINUTES], or eval [--file CASES] [--baseline REPORT] [--output REPORT] [--mode keyword|hybrid]',
+      'Usage: pnpm dev -- index|status|rebuild|fetch-model, search "keywords" [--project ID] [--limit N] [--mode keyword|hybrid] [--json], related DOCUMENT_ID [--project ID] [--limit N], code-build [--project ID], code-search "name" --project ID [--limit N], code-impact NODE_ID --project ID [--direction dependents|dependencies] [--depth N] [--limit N],watch [--debounce MS] [--reconcile MINUTES], or eval [--file CASES] [--baseline REPORT] [--output REPORT] [--mode keyword|hybrid]',
     );
   const config = await loadConfig(undefined, { allowUnavailableRoots: true });
-  if (command === "related") {
+  if (command === "code-build") {
+    const { values } = parseArgs({ args: rest, options: { project: { type: "string" } } });
+    const projects = values.project
+      ? [values.project]
+      : config.scopes.filter((s) => s.codeGraph).map((s) => s.id);
+    if (!projects.length) throw new Error("No project configures a codeGraph");
+    const results = [];
+    for (const id of projects) results.push(await buildCodeGraph(config, id));
+    console.log(JSON.stringify(results, null, 2));
+  } else if (command === "code-search") {
+    const { positionals, values } = parseArgs({
+      args: rest,
+      allowPositionals: true,
+      options: { project: { type: "string" }, limit: { type: "string" } },
+    });
+    if (positionals.length !== 1) throw new Error("Supply one name to search for");
+    const output = await searchCodeGraph(config, {
+      query: positionals[0],
+      projectId: values.project,
+      limit: values.limit === undefined ? undefined : Number(values.limit),
+    });
+    console.log(JSON.stringify(output, null, 2));
+  } else if (command === "code-impact") {
+    const { positionals, values } = parseArgs({
+      args: rest,
+      allowPositionals: true,
+      options: {
+        project: { type: "string" },
+        direction: { type: "string" },
+        depth: { type: "string" },
+        limit: { type: "string" },
+      },
+    });
+    if (positionals.length !== 1) throw new Error("Supply one node ID from code-search");
+    const number = (value: string | undefined) =>
+      value === undefined ? undefined : Number(value);
+    const output = await getCodeImpact(config, {
+      nodeId: positionals[0],
+      projectId: values.project,
+      direction: values.direction,
+      depth: number(values.depth),
+      limit: number(values.limit),
+    });
+    console.log(JSON.stringify(output, null, 2));
+  } else if (command === "related") {
     const { positionals, values } = parseArgs({
       args: rest,
       allowPositionals: true,
