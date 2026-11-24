@@ -258,8 +258,9 @@ try {
     const output = await withWriteSession(
       config,
       config.scopes.map((scope) => scope.id),
-      async ({ db }) => {
-        const result = await indexNotes(db, config, rebuild);
+      async (session) => {
+        const { db } = session;
+        const result = await indexNotes(session, config);
         if (result.some((scope) => scope.errors.length)) process.exitCode = 1;
         if (embedder)
           await embedPending(db, embedder).catch((error: Error) => {

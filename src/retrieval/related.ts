@@ -103,9 +103,7 @@ export async function getRelatedDocuments(config: Config, input: unknown) {
   const { documentId, projectId, limit = 20 } = relatedInput.parse(input);
   return withScopedIndex(config, projectId, async ({ db, capabilities }, scopeId) => {
     if (!capabilities.references)
-      throw new IndexUpgradeNeededError(
-        "Links are unavailable until the index is upgraded. Run the index command.",
-      );
+      throw new IndexUpgradeNeededError("references");
     const documents: VisibleDocument[] = (
       await db.all(
         "SELECT id, scope_id, relative_path, substr(title,1,256) AS title FROM documents WHERE scope_id IN ('shared',?)",

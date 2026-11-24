@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import type { Database, Transaction } from "@tursodatabase/database";
+import type { Transaction } from "@tursodatabase/database";
 import type { Config } from "../config/load-config.ts";
 import {
   markdownFiles,
@@ -8,7 +8,11 @@ import {
   type ScanError,
 } from "../filesystem/markdown-reader.ts";
 import { parseMarkdown } from "../markdown/chunk-markdown.ts";
-import { type IndexSession, writeReferences } from "../storage/index-session.ts";
+import {
+  type IndexSession,
+  type WriteSession,
+  writeReferences,
+} from "../storage/index-session.ts";
 
 async function scanScope(
   tx: Transaction,
@@ -135,28 +139,23 @@ async function scanScope(
   };
 }
 
-export async function indexNotes(
-  db: Database,
-  config: Config,
-  rebuild: boolean,
-  scopeIds?: ReadonlySet<string>,
-) {
+/**
+ * Scans the scopes the write session was opened for; their roots are already
+ * verified. A rebuild replaces every configured scope in one transaction.
+ */
+export async function indexNotes(session: WriteSession, config: Config) {
+  const { db, rebuild } = session;
+  const scopeIds = new Set(session.scopeIds);
+  const scopes = config.scopes.filter((scope) => scopeIds.has(scope.id));
   const scan = (tx: Transaction, scope: Config["scopes"][number]) =>
     scanScope(tx, scope, config.exclude);
-  if (scopeIds && rebuild)
-    throw new Error("Rebuild always replaces every configured scope");
-  if (scopeIds) {
-    const result = [];
-    for (const scope of config.scopes)
-      if (scopeIds.has(scope.id))
-        result.push(await db.transactionAsync(scan)(scope));
-    return result;
-  }
-  if (rebuild)
+  if (rebuild) {
+    if (scopes.length !== config.scopes.length)
+      throw new Error("Rebuild always replaces every configured scope");
     return db.transactionAsync(async (tx) => {
       await tx.exec("DELETE FROM scopes");
       const result = [];
-      for (const scope of config.scopes) {
+      for (const scope of scopes) {
         const summary = await scan(tx, scope);
         if (summary.errors.length)
           throw new Error(
@@ -166,15 +165,15 @@ export async function indexNotes(
       }
       return result;
     })();
+  }
   const result = [];
-  for (const scope of config.scopes)
-    result.push(await db.transactionAsync(scan)(scope));
+  for (const scope of scopes) result.push(await db.transactionAsync(scan)(scope));
   return result;
 }
 
 export async function indexStatus({ db, capabilities }: IndexSession) {
   const scopes = [];
-  const semantic = capabilities.embeddings;
+  const hasEmbeddings = capabilities.embeddings;
   for (const { id } of await db.all("SELECT id FROM scopes ORDER BY id")) {
     const counts = await db.get(
       `SELECT COUNT(DISTINCT d.id) AS documents,COUNT(c.id) AS chunks FROM documents d
@@ -182,7 +181,7 @@ export async function indexStatus({ db, capabilities }: IndexSession) {
       id,
     );
     // Vectors per model, so a partly embedded scope or a model change is visible.
-    const embeddings = semantic
+    const embeddings = hasEmbeddings
       ? Object.fromEntries(
           (
             await db.all(

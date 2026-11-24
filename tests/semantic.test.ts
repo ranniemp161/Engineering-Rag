@@ -77,8 +77,9 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   await writeFile(configFile, JSON.stringify(raw));
   const config = await loadConfig(configFile, { allowUnavailableRoots: true });
   const index = (embedder: Embedder) =>
-    withWriteSession({ databasePath: config.databasePath, scopes: [] }, [], async ({ db }) => {
-      const scans = await indexNotes(db, config, false);
+    withWriteSession(config, config.scopes.map((s) => s.id), async (session) => {
+      const { db } = session;
+      const scans = await indexNotes(session, config);
       return { scans, embedding: await embedPending(db, embedder, 2) };
     });
   const search = (

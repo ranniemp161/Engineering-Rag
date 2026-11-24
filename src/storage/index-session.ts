@@ -12,7 +12,18 @@ export class IndexMissingError extends IndexError {}
 export class IndexBusyError extends IndexError {}
 export class IndexRootChangedError extends IndexError {}
 export class UnknownScopeError extends IndexError {}
-export class IndexUpgradeNeededError extends IndexError {}
+export class IndexUpgradeNeededError extends IndexError {
+  constructor(capability: keyof IndexCapabilities) {
+    super(UPGRADE_MESSAGES[capability]);
+  }
+}
+
+const UPGRADE_MESSAGES: Record<keyof IndexCapabilities, string> = {
+  embeddings:
+    "Embeddings are unavailable until the index is upgraded. Run the index command.",
+  references:
+    "Links are unavailable until the index is upgraded. Run the index command.",
+};
 
 export type SessionConfig = {
   databasePath: Config["databasePath"];
@@ -23,6 +34,12 @@ export type SessionConfig = {
 export type IndexCapabilities = { embeddings: boolean; references: boolean };
 
 export type IndexSession = { db: Database; capabilities: IndexCapabilities };
+
+/** A write session also records which scopes it may change, and whether it rebuilds. */
+export type WriteSession = IndexSession & {
+  scopeIds: readonly string[];
+  rebuild: boolean;
+};
 
 /**
  * Opens the index read-only under the shared guard. A missing index creates
@@ -56,27 +73,29 @@ export async function withReadSession<T>(
 export async function withWriteSession<T>(
   config: SessionConfig,
   scopeIds: readonly string[],
-  operation: (session: IndexSession) => Promise<T>,
+  operation: (session: WriteSession) => Promise<T>,
   options: { rebuild?: boolean } = {},
 ): Promise<T> {
   knownScopes(config, scopeIds);
   await mkdir(path.dirname(config.databasePath), { recursive: true });
   return guarded(config.databasePath, false, async (db) => {
     const capabilities = capabilitiesOf(await migrate(db, false));
-    if (!options.rebuild)
+    const rebuild = options.rebuild ?? false;
+    if (!rebuild)
       await verifyRoots(db, config, scopeIds, (id) =>
         new IndexRootChangedError(
           `Scope ${id} changed roots. Use rebuild to replace its previous index.`,
         ),
       );
-    return operation({ db, capabilities });
+    return operation({ db, capabilities, scopeIds, rebuild });
   });
 }
 
 function knownScopes(config: SessionConfig, scopeIds: readonly string[]) {
   for (const id of scopeIds)
     if (!config.scopes.some((scope) => scope.id === id))
-      throw new UnknownScopeError("Unknown scope ID");
+      // The shared scope is required by configuration, so only a project can be unknown.
+      throw new UnknownScopeError("Unknown project ID");
 }
 
 function capabilitiesOf(version: number): IndexCapabilities {
@@ -152,7 +171,7 @@ const REFERENCES = `
     line INTEGER NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL);
   CREATE INDEX document_references_document ON document_references(document_id);`;
 
-export const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 3;
 
 export async function writeReferences(
   tx: Pick<Database, "run" | "prepare">,

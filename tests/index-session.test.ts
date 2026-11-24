@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { link, mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readdir, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -69,10 +69,14 @@ test("a second session waits, then reports the index busy", async (t) => {
   const { config } = await fixture(t);
   await withWriteSession(config, [], async () => {});
   await withReadSession(config, [], async () => {
+    const started = performance.now();
     await assert.rejects(
       withReadSession(config, [], async () => {}),
       (error) => error instanceof IndexBusyError && /^INDEX_BUSY/.test(error.message),
     );
+    // The wait is bounded: about one second, never indefinite.
+    const waited = performance.now() - started;
+    assert.ok(waited >= 900 && waited < 5000, `waited ${waited} ms`);
   });
 });
 
@@ -101,12 +105,12 @@ test("a moved scope root is refused unless rebuilding", async (t) => {
   await withWriteSession(moved, ["shared"], async () => {}, { rebuild: true });
 });
 
-test("an unknown scope is refused before the index is opened", async (t) => {
+test("an unknown project is refused before the index is opened", async (t) => {
   const { dir, config } = await fixture(t);
-  await assert.rejects(
-    withWriteSession(config, ["nope"], async () => {}),
-    UnknownScopeError,
-  );
+  const unknown = (error: unknown) =>
+    error instanceof UnknownScopeError && /^Unknown project ID$/.test(error.message);
+  await assert.rejects(withReadSession(config, ["shared", "nope"], async () => {}), unknown);
+  await assert.rejects(withWriteSession(config, ["nope"], async () => {}), unknown);
   assert.deepEqual(await readdir(dir), []);
 });
 
@@ -118,6 +122,19 @@ test("the guard file survives a rebuild and linked sidecars are refused", async 
   await withWriteSession(config, ["shared"], async () => {}, { rebuild: true });
   assert.equal((await stat(guard)).ino, before.ino);
   await link(guard, path.join(dir, "extra-link"));
+  await assert.rejects(
+    withReadSession(config, [], async () => {}),
+    /ordinary private files/,
+  );
+});
+
+test("a symlinked sidecar is refused", async (t) => {
+  const { dir, config } = await fixture(t);
+  await withWriteSession(config, [], async () => {});
+  const target = path.join(dir, "elsewhere");
+  await mkdir(target);
+  // A junction needs no privilege on Windows; elsewhere a directory symlink.
+  await symlink(target, `${config.databasePath}-journal`, process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(
     withReadSession(config, [], async () => {}),
     /ordinary private files/,

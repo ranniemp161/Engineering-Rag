@@ -126,8 +126,9 @@ export async function watchNotes(config: Config, options: WatchOptions) {
             return undefined;
           }));
       let embedding: Awaited<ReturnType<typeof embedPending>> | undefined;
-      const results = await withWriteSession(config, scopes, async ({ db }) => {
-        const scanned = await indexNotes(db, config, false, new Set(scopes));
+      const results = await withWriteSession(config, scopes, async (session) => {
+        const { db } = session;
+        const scanned = await indexNotes(session, config);
         if (embedder)
           embedding = await embedPending(db, embedder).catch((error: Error) => {
             report({ event: "error", scopes, message: `Embeddings not updated: ${error.message}` });

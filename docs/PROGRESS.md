@@ -323,3 +323,22 @@ Took architecture candidate 1 through a design interview and implemented it on b
 **Checks** (Node 26.12.1; Node 24 is not installed on this machine): build, typecheck and lint passed; 40/40 tests passed; the MCP protocol test passed against the compiled server (`TEST_COMPILED_MCP=1`).
 
 Unresolved: the viewer now hides input validation messages (for example Zod errors) behind the generic message. Candidates 2–4 remain open.
+
+### Index session review fixes
+
+A two-axis review of PR #3 (standards and agreed design) found gaps; fixed on the same branch.
+- **Tests added:** the busy wait is measured (about 1 s, bounded); an unknown project is refused for read and write sessions and creates nothing; a symlinked sidecar (a junction on Windows) is refused. The earlier "linked sidecar" case only covered hard links.
+- **Scope validation** now lives only in the session. `scoped-index.ts` no longer checks project type, so `projectId: "shared"` now reads shared knowledge instead of failing with "Unknown project ID". Unknown IDs report "Unknown project ID", because configuration always requires the shared scope.
+- **Needs upgrade:** `IndexUpgradeNeededError` takes the missing capability and owns its message.
+- **`indexNotes`** now takes the write session and scans only the scopes that session verified. A rebuild must cover every configured scope. Before, a caller could scan scopes it never passed to the session.
+- **Cleanup:** `SCHEMA_VERSION` is no longer exported; `hasTable` and `semantic` are renamed `hasEmbeddings`.
+- **Records:** STATUS said "uncommitted" after the commit; corrected.
+
+**Checks** (Node 26.12.1): build, typecheck and lint passed; 41/41 tests passed; the compiled MCP protocol test passed.
+
+Unresolved, and left for the operator:
+- Rerun the checks on Node 24 LTS.
+- The viewer test's free-port race and stderr polling.
+- CLI `status` catching "index missing" as an exception rather than a result type.
+- Repeated `{ databasePath, scopes: [] }` setup in tests.
+- Viewer validation messages hidden behind the generic message.

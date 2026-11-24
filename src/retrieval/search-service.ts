@@ -206,12 +206,12 @@ async function hybridSearch(
     semantic: config.semantic?.semanticWeight ?? 1,
   };
   return withScopedIndex(config, request.projectId, async ({ db, capabilities }, scopeId) => {
-    const hasTable = capabilities.embeddings;
-    const semanticRows = hasTable
+    const hasEmbeddings = capabilities.embeddings;
+    const semanticRows = hasEmbeddings
       ? await db.all(vectorQuery, request.model, toBlob(request.vector), scopeId, CANDIDATES)
       : [];
     if (!semanticRows.length) {
-      const indexed = hasTable
+      const indexed = hasEmbeddings
         ? await db.get(
             "SELECT 1 AS present FROM chunk_embeddings WHERE model = ? LIMIT 1",
             request.model,
