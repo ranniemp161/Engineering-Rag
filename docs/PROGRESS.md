@@ -383,3 +383,9 @@ Not chosen, left as review notes:
 - the `hasEmbeddings` alias,
 - the multi-step viewer test,
 - the schema-downgrade fixture.
+
+### Merged the index session and restarted the watcher
+
+PR #3 merged into `main` as `1ef89c3` (merge commit; GitGuardian check passed). Ran `pnpm build` on `main`, then restarted the `Engineering index watch` task: the previous watcher logged `stopped`, exactly one new `watch` process started, and its startup scan completed for both scopes with no errors and no updates. The `index-session` branch remains on GitHub.
+
+Unresolved: Node 24 LTS checks.
