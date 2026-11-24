@@ -13,9 +13,22 @@ const schema = z.strictObject({
         displayName: text,
         type: z.enum(["shared", "project"]),
         rootPath: text,
+        // Code checkouts whose working directory selects this project (MCP detection).
+        repositories: z.array(text).max(20).optional(),
+        // Graphify code graph: the checkout it reads and the directory it writes.
+        codeGraph: z
+          .strictObject({
+            repository: text.optional(),
+            output: text,
+            // Also regenerate graph.html, GRAPH_REPORT.md and GRAPH_TREE.html on each build.
+            visualize: z.boolean().optional(),
+          })
+          .optional(),
       }),
     )
     .min(1),
+  // When true, MCP calls without projectId use the project of the host's workspace.
+  detectProject: z.boolean().default(false),
   exclude: z
     .array(text)
     .default([
@@ -30,6 +43,17 @@ const schema = z.strictObject({
       maxLimit: limit.default(20),
     })
     .prefault({}),
+  // Optional hybrid retrieval. Omitting it keeps keyword-only search.
+  semantic: z
+    .strictObject({
+      model: text.default("Xenova/bge-small-en-v1.5"),
+      modelDir: text.default("./data/models"),
+      queryPrefix: z.string().max(200).optional(),
+      passagePrefix: z.string().max(200).optional(),
+      keywordWeight: z.number().min(0).max(10).default(1),
+      semanticWeight: z.number().min(0).max(10).default(1),
+    })
+    .optional(),
 });
 
 export type Config = z.infer<typeof schema>;
@@ -142,6 +166,42 @@ export async function loadConfig(
       throw new Error(`Overlapping scope roots at ${scope.rootPath}`);
     }
     roots.push(scope.rootPath);
+    if (scope.repositories) {
+      if (scope.type !== "project")
+        throw new Error("Only project scopes may list repositories");
+      // Repositories are only compared with working directories, never read.
+      scope.repositories = await Promise.all(
+        scope.repositories.map(async (repository) => {
+          const resolved = localPath(base, repository, "repositories");
+          return realpath(resolved).catch(() => resolved);
+        }),
+      );
+    }
+  }
+  // Resolved after all roots are known so outputs can be checked against them.
+  for (const scope of config.scopes) {
+    if (!scope.codeGraph) continue;
+    if (scope.type !== "project")
+      throw new Error("Only project scopes may configure a code graph");
+    const graph = scope.codeGraph as { repository: string; output: string };
+    const repository = localPath(
+      base,
+      graph.repository ?? scope.repositories?.[0] ?? scope.rootPath,
+      "codeGraph.repository",
+    );
+    graph.repository = await realpath(repository).catch(() => repository);
+    const output = await canonicalDestination(
+      localPath(base, graph.output, "codeGraph.output"),
+    );
+    // Graphify writes here, so it must not be a source root or inside a checkout.
+    if (
+      roots.some((root) => contains(root, output) || contains(output, root)) ||
+      contains(graph.repository, output)
+    )
+      throw new Error(
+        `codeGraph.output for ${scope.id} must be outside source roots and the repository`,
+      );
+    graph.output = output;
   }
 
   try {
@@ -165,6 +225,21 @@ export async function loadConfig(
     }
   } catch (error) {
     throw new Error(`Invalid databasePath: ${(error as Error).message}`);
+  }
+  if (config.semantic) {
+    const semantic = config.semantic;
+    try {
+      const directory = await canonicalDestination(
+        localPath(base, semantic.modelDir, "semantic.modelDir"),
+      );
+      semantic.modelDir = localPath(base, directory, "Resolved modelDir");
+      if (roots.some((root) => contains(root, directory)))
+        throw new Error("Choose a model directory outside source roots");
+    } catch (error) {
+      throw new Error(`Invalid semantic.modelDir: ${(error as Error).message}`);
+    }
+    if (semantic.keywordWeight + semantic.semanticWeight === 0)
+      throw new Error("semantic weights cannot both be zero");
   }
   return config;
 }

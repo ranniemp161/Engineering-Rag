@@ -64,7 +64,7 @@ Build a **local-first Engineering Intelligence Engine** that indexes user-approv
 
 ### Embedded driver and compatibility
 
-Use the official local-file driver. Reject remote URLs and network-share paths. Runtime configuration contains a local database path only. Dependencies may be downloaded during setup. Indexing and MCP retrieval must work offline after setup. The Turso engine is SQLite-compatible but implements its own keyword index. Its native exact vector functions are a future evaluation option. The MVP schema has no embeddings.
+Use the official local-file driver. Reject remote URLs and network-share paths. Runtime configuration contains a local database path only. Dependencies may be downloaded during setup. Indexing and MCP retrieval must work offline after setup. The Turso engine is SQLite-compatible but implements its own keyword index. Its native exact vector functions are a future evaluation option. The MVP schema has no embeddings. Milestone 7 verified `vector32` and `vector_distance_cos` on Turso 0.8.4, with Float32 blobs and cascading deletes. An exact scan of 10,000 × 384 vectors took about 24 ms, and schema version 2 stores the embeddings.
 
 The Windows compatibility milestone verifies scoped ranking and cross-process access before application scaffolding. Record the exact SDK version, query shape, feature flags, and limitations. A failed gate requires review before implementation proceeds.
 
@@ -502,6 +502,96 @@ These are fixture column names. Bind the validated query, permitted project ID (
 - Validate a real task against fixture or approved vault notes.
 - **Exit:** End-to-end demonstration: host retrieves a specific note and cites its source; limitations documented.
 
+### Milestone 5 — Automatic index refresh (post-MVP)
+
+Approved by the operator on 2026-11-23 as the first post-MVP milestone. It implements future extension 5 (incremental watcher). Automatic project detection remains a separate, later item.
+
+- Add a `watch` CLI command that keeps the index current while it runs. Use recursive filesystem watching per configured root. Ignore excluded paths and files other than Markdown. Treat events without an extension as possible directory changes.
+- Debounce changes per scope, with a quiet period and a maximum wait. Rescan only the affected scopes through the existing transactional scope scan. Hash skipping, deletion only after a complete enumeration and preservation of an unavailable root's entries must behave as they do for `index`.
+- Hold the index guard only during a rescan, so MCP reads and other commands can interleave. Retry a busy index after a delay. Do not retry other failures on a timer.
+- Recover without a restart. A missing root is reattached when it appears. A root found unavailable is reattached by path. A periodic reconciliation (default 15 minutes, configurable, can be disabled) renews watchers and rescans every scope to cover missed events.
+- Print one JSON object per line to stdout. Stop cleanly on SIGINT or SIGTERM.
+- Do not change the MCP tool contracts, the schema or the configuration file.
+- **Exit:** Fixture tests cover create, edit and delete in nested folders; ignored excluded and non-Markdown files; one rescan per burst of edits; retry after a busy index; a root that appears later; a root that is moved away and replaced; reconciliation; and the CLI's JSON output. The existing suite still passes. A run against an approved real scope is recorded.
+
+### Milestone 6 — Retrieval evaluation (post-MVP)
+
+Started on 2026-11-24 as the next post-MVP milestone. It implements the evaluation corpus and metrics from future extension 6 and produces the evidence that extension 2 (hybrid retrieval) requires.
+
+- Define an operator-local evaluation file (`evaluation.local.json`, ignored by Git, with a committed placeholder example). Each case has a unique ID, a query, an optional project, tags, and one or more expected documents. An expected document has a scope, a relative path and optional inclusive lines that a cited passage must overlap. Reject cases whose expected scope the search cannot reach.
+- Add an `eval` CLI command. It runs each case through `searchKnowledge` at the configured maximum limit and reports hit@1, hit@3, hit@5, hit@depth, MRR, recall@5 and latency percentiles, overall and per tag and per project, along with each case's rank and top results. A search error counts as a miss.
+- Support saving a report and comparing a run with a saved baseline. Report metric deltas, added and removed cases, improvements and regressions (a case that falls out of the top 5). Exit with code 1 on any regression.
+- Show the same report and comparison in the local viewer.
+- Do not change the MCP tool contracts, the schema or the index.
+- **Exit:** Fixture tests cover exact metrics, line constraints, grouping, baseline regressions and case changes, invalid and unreachable cases, and the viewer endpoint. A baseline for an approved real scope is recorded, separating keyword queries from paraphrased ones.
+
+### Milestone 7 — Hybrid retrieval (post-MVP)
+
+Started on 2026-11-24. It implements future extension 2. The Milestone 6 baseline supplied the required evidence: 4 of 14 paraphrased GroceryOS questions found no expected document, and paraphrase hit@5 was 0.571 against 1.0 for keyword queries.
+
+- Keep hybrid retrieval optional. An optional `semantic` configuration section names the embedding model, a local model directory outside source roots, optional query and passage prefixes, and the keyword and semantic weights for fusion. Without it, behaviour stays keyword-only.
+- Use a local embedding model through the optional `@huggingface/transformers` dependency. Only the explicit `fetch-model` command may download. Every other operation disables remote model access, so indexing and retrieval stay offline after setup. A missing package or model is a clear diagnostic. Default searches fall back to keywords, while explicit hybrid requests fail.
+- Schema version 2 adds `chunk_embeddings` (one vector per chunk and model, cascading with chunks). Version 1 indexes upgrade on the next write and remain searchable read-only.
+- After each scan, `index`, `rebuild` and `watch` embed chunks without a vector for the configured model, in batches that each commit separately. Unchanged documents keep their vectors. Changing the model replaces all vectors. Keyword indexing commits even when embedding fails, and the run exits with code 1.
+- Retrieve scoped candidates from Turso's native full-text index and from exact `vector_distance_cos` ordering (no approximate index), and combine them with weighted Reciprocal Rank Fusion (k = 60). Keep snippets, de-duplication, the response budget and scope isolation. The MCP contract is unchanged; `score` becomes the fused score in hybrid mode.
+- Add `--mode keyword|hybrid` to `search` and `eval`, record mode and model in evaluation reports, and report vectors per scope and model in `status`.
+- **Exit:** Offline fixture tests with a deterministic embedder cover fusion, paraphrase retrieval, scope isolation, incremental and model-change re-embedding, schema upgrade and fallback, mode comparison, configuration validation and the offline failure path. On the approved real scope, hybrid retrieval improves paraphrase hit@5 over the keyword baseline with no keyword case leaving the top 5.
+
+### Milestone 8 — Explicit note links and project detection (post-MVP)
+
+Started on 2026-11-24. It implements future extension 4 (automatic project detection) and adds a link graph from explicit references only. LLM-built knowledge graphs (GraphRAG) were considered and rejected for now: the evaluation shows no failing global or multi-hop questions, agents already chain searches, and extracting a graph with an LLM would send every note to a provider and break offline, rebuildable indexing.
+
+- Extract references while indexing:
+  - Markdown links to `.md` files, including link text that wraps across lines.
+  - Wikilinks, including headings, aliases and embeds of notes.
+  - Numbered references (3–6 digits) such as `0020`, excluding dates, versions, paths and identifiers.
+  - References inside fenced code are skipped.
+- Store references per document in schema version 3 (`document_references`, cascading with documents). Older indexes stay readable and backfill references from stored source text on the next write. Resolve references at query time, so a note added later resolves without rescanning the notes that link to it.
+- Resolve paths and numbers within the citing document's scope; wikilink names may also resolve to shared notes. Drop ambiguous, unresolved and self references. Resolve only against the scopes the request may see.
+- Add the read-only MCP tool `get_related_documents(documentId, projectId?, limit?)`, which returns outgoing and incoming related documents with the citing lines. Add the matching `related` CLI command and viewer links. Existing tool contracts are unchanged.
+- Add optional project detection (`detectProject`, default false) with optional `repositories` per project scope. When a tool call omits `projectId`, the server maps the host's MCP roots, or its launch directory when roots are unavailable, to exactly one project root or repository. Ambiguous or unmatched workspaces keep the shared-only default. An explicit `projectId` always wins, and responses name a detected project in `detectedProjectId`.
+- **Exit:** Fixture tests cover:
+  - extraction edge cases;
+  - resolution in both directions;
+  - scope isolation, including identical numbers in another project;
+  - query-time resolution of notes added later;
+  - the schema upgrade and backfill;
+  - detection through roots, the launch directory and ambiguous workspaces;
+  - explicit overrides, against the source and the compiled server.
+
+  Links for an approved real scope are checked by hand.
+
+### Milestone 9 — Graphify code graph adapter (post-MVP)
+
+Started on 2026-11-24. It implements future extension 1. The Graphify interfaces were verified against the installed version, not assumed:
+
+- **Version:** graphifyy 0.9.97, with the CLI at `~/.local/bin/graphify`.
+- **Extraction:** `graphify update <path>` extracts code structurally (tree-sitter) without an LLM.
+- **Output location:** by default it writes `graphify-out/` inside the scanned repository whatever the working directory, but the `GRAPHIFY_OUT` environment variable accepts an absolute path.
+- **`graph.json` format:** NetworkX node-link data.
+  - Nodes carry `id`, `label`, a repository-relative `source_file` and `source_location` such as `L12`.
+  - Links carry `source`, `target`, `relation`, `confidence` (`EXTRACTED` or `INFERRED`), `source_file` and `source_location`.
+- **Impact relations:** Graphify's `affected` command walks 15 dependency relations in reverse, to depth 2, seeded with the node's `method` and `contains` members.
+
+The adapter:
+
+- Add optional per-project `codeGraph` configuration with a `repository` (default: the first listed repository, else the note root) and an `output` directory outside source roots and the repository.
+- Add `code-build`, which runs `graphify update <repository> --no-cluster` with `GRAPHIFY_OUT` set to `output`, the working directory set to `output`, and LLM API keys removed from the environment. The repository is only read.
+- Read `graph.json` directly, cached by modification time and size, and expose two read-only MCP tools.
+  - `search_code_graph(query, projectId?, limit?)` matches names split on case and punctuation; an exact name ranks first.
+  - `get_code_impact(nodeId, projectId?, direction?, depth?, limit?)` uses Graphify's relation set: `dependents` reverse the edges and `dependencies` follow them, with members seeding the walk.
+
+  Each hit cites the edge's call or import site and its confidence. Paths are repository-relative, and an absolute path outside the repository is returned as `null`. Code tools need a project, explicit or detected.
+- Matching CLI commands: `code-search` and `code-impact`.
+- Not reproduced from Graphify: method-override expansion in `affected`, LLM community labels, and semantic document extraction.
+- Follow-up requested by the operator on 2026-11-24:
+  - `code-build --visualize`, or `codeGraph.visualize`, also runs `cluster-only --no-label` and `tree` with the same output redirection and key removal, producing `graph.html`, `GRAPH_REPORT.md` and `GRAPH_TREE.html`.
+  - `watch` rebuilds each code graph at startup, after source-file changes (Graphify-parsed extensions, excluded paths ignored, 10 s debounce, 60 s maximum wait), and on reconciliation.
+  - One build runs at a time, and a change during a build queues one more. Failures are reported and retried on the next change. `--no-code` disables code refresh.
+- **Exit:** Fixture tests based on recorded Graphify output cover ranking, identifier splitting, path privacy, impact in both directions with member seeding and depth, malformed and missing graphs, scope errors, and configuration rejection of outputs inside source roots or the repository. The build step is tested with a substitute executable that records its arguments, working directory and environment, plus the failure paths.
+
+  A build for an approved real repository leaves its `git status` unchanged, and the MCP tools are exercised through the compiled server.
+
 **Stop after each milestone for review if running in an interactive Codex session.** Do not implement the whole roadmap in one unreviewed pass.
 
 ## 15. Test plan and acceptance matrix
@@ -531,7 +621,7 @@ These are fixture column names. Bind the validated query, permitted project ID (
 4. Run migrations/indexing through the documented CLI.
 5. Test local search before connecting any AI host.
 6. Register the built MCP server as a local `stdio` command in a supported host.
-7. Re-run `index` when notes change (manual MVP; scheduling/watch mode deferred).
+7. Re-run `index` when notes change, or keep `watch` running (Milestone 5) to refresh the index automatically.
 
 **No deployment requirement:** The host starts the MCP server as a local child process. No domain, VPS, Docker, reverse proxy, or cloud database is needed. A packaged npm CLI may be considered after the MVP is stable.
 
@@ -541,12 +631,12 @@ For an existing installation, create a separate Turso index file. Reindex approv
 
 ## 17. Future extensions — explicitly out of scope
 
-1. **Graphify adapter:** Retrieve symbol dependencies and code impact information from an installed Graphify instance, after verifying its actual APIs and version. Do not assume its MCP tool names or schemas.
-2. **Hybrid retrieval:** Add embeddings and vector search only after collecting retrieval quality failures that keyword search cannot solve. Evaluate exact cosine similarity in the embedded engine against scoped retrieval quality and latency. Verify any approximate index on the selected driver before relying on it.
+1. **Graphify adapter:** Retrieve symbol dependencies and code impact information from an installed Graphify instance, after verifying its actual APIs and version. Do not assume its MCP tool names or schemas. Delivered as Milestone 9 against graphifyy 0.9.97.
+2. **Hybrid retrieval:** Add embeddings and vector search only after collecting retrieval quality failures that keyword search cannot solve. Evaluate exact cosine similarity in the embedded engine against scoped retrieval quality and latency. Verify any approximate index on the selected driver before relying on it. Delivered as Milestone 7 with exact cosine search. Turso 0.8.4 rejected the `libsql_vector_idx` index syntax, so no approximate index is used.
 3. **Skills-aware retrieval:** Index selected `SKILL.md` metadata and provide explicit skill selection. Skills are operational instructions and must be reviewed before being elevated to agent guidance.
-4. **Automatic project detection:** Safely map a verified repository path to a configured project scope, with manual override.
-5. **Incremental watcher:** Debounced file watching with recovery and periodic reconciliation.
-6. **Retrieval diagnostics:** Local dashboard, query evaluation corpus, and retrieval metrics.
+4. **Automatic project detection:** Safely map a verified repository path to a configured project scope, with manual override. Delivered as Milestone 8.
+5. **Incremental watcher:** Debounced file watching with recovery and periodic reconciliation. Delivered as Milestone 5.
+6. **Retrieval diagnostics:** Local dashboard, query evaluation corpus, and retrieval metrics. The corpus, metrics and viewer report were delivered as Milestone 6.
 7. **Packaging:** npm-distributed executable with documented updates and cross-platform installation.
 8. **Remote MCP transport:** Only if there is a concrete need; requires separate authentication, authorization, and threat modeling.
 
@@ -556,8 +646,8 @@ For an existing installation, create a separate Turso index file. Reindex approv
 - **First MCP host:** Recommend Codex or Claude Code for initial verification; T3 Code integration requires checking current support.
 - **Selected knowledge folders:** Must be explicitly approved before indexing.
 - **Initial project scope:** `groceryos` is illustrative; no actual notes are assumed to exist.
-- **Index refresh:** Manual CLI in MVP, not automatic synchronization.
-- **Embedding model:** Not selected because vector retrieval is deferred.
+- **Index refresh:** Manual CLI in MVP. Milestone 5 adds the optional `watch` command. Starting it at logon is left to the operator.
+- **Embedding model:** Milestone 7 defaults to `Xenova/bge-small-en-v1.5` (384 dimensions, 8-bit quantized, about 33 MB). It was chosen from four candidates measured on the GroceryOS evaluation cases.
 
 ## 19. Definition of done (MVP)
 

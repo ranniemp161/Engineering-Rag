@@ -8,6 +8,7 @@ import {
   type ScanError,
 } from "../filesystem/markdown-reader.ts";
 import { parseMarkdown } from "../markdown/chunk-markdown.ts";
+import { writeReferences } from "../storage/turso.ts";
 
 async function scanScope(
   tx: Transaction,
@@ -83,6 +84,7 @@ async function scanScope(
       new Date().toISOString(),
       source,
     );
+    await writeReferences(tx, id, source);
     await tx.run("DELETE FROM chunks WHERE document_id=?", id);
     for (const [ordinal, chunk] of parsed.chunks.entries())
       await insert.run(
@@ -144,9 +146,19 @@ export async function indexNotes(
   db: Database,
   config: Config,
   rebuild: boolean,
+  scopeIds?: ReadonlySet<string>,
 ) {
   const scan = (tx: Transaction, scope: Config["scopes"][number]) =>
     scanScope(tx, scope, config.exclude);
+  if (scopeIds && rebuild)
+    throw new Error("Rebuild always replaces every configured scope");
+  if (scopeIds) {
+    const result = [];
+    for (const scope of config.scopes)
+      if (scopeIds.has(scope.id))
+        result.push(await db.transactionAsync(scan)(scope));
+    return result;
+  }
   if (rebuild)
     return db.transactionAsync(async (tx) => {
       await tx.exec("DELETE FROM scopes");
@@ -169,12 +181,28 @@ export async function indexNotes(
 
 export async function indexStatus(db: Database) {
   const scopes = [];
+  const semantic = await db.get(
+    "SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='chunk_embeddings'",
+  );
   for (const { id } of await db.all("SELECT id FROM scopes ORDER BY id")) {
     const counts = await db.get(
       `SELECT COUNT(DISTINCT d.id) AS documents,COUNT(c.id) AS chunks FROM documents d
       LEFT JOIN chunks c ON c.document_id=d.id WHERE d.scope_id=?`,
       id,
     );
+    // Vectors per model, so a partly embedded scope or a model change is visible.
+    const embeddings = semantic
+      ? Object.fromEntries(
+          (
+            await db.all(
+              `SELECT e.model, COUNT(*) AS n FROM chunk_embeddings e
+              JOIN chunks c ON c.id=e.chunk_id JOIN documents d ON d.id=c.document_id
+              WHERE d.scope_id=? GROUP BY e.model ORDER BY e.model`,
+              id,
+            )
+          ).map((row) => [row.model, row.n]),
+        )
+      : {};
     const latest = await db.get(
       "SELECT id,status,finished_at,scanned,updated,removed FROM index_runs WHERE scope_id=? ORDER BY rowid DESC LIMIT 1",
       id,
@@ -189,7 +217,7 @@ export async function indexStatus(db: Database) {
           latest.id,
         )
       : [];
-    scopes.push({ id, ...counts, ...success, latest, errors });
+    scopes.push({ id, ...counts, embeddings, ...success, latest, errors });
   }
   return { initialized: true, scopes };
 }
