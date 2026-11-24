@@ -268,3 +268,22 @@ At the operator's request, the MCP server now sends server instructions during i
 **Checks** (Node 24): build, typecheck and lint passed; all 31 tests passed; the MCP protocol test also passed against the compiled server (`TEST_COMPILED_MCP=1`).
 
 Unresolved: whether each host (Claude Code, Codex, Gemini, Copilot) shows the instructions to the model, and whether agents then search unprompted, is unverified. Next step: restart the hosts and watch whether agents call search on their own; consider hooks only if they do not.
+
+### Fixed the watch task restart gap
+
+**Cause, observed on the real task:** `Stop-ScheduledTask` terminates only the task's top process, `conhost.exe --headless`. The `cmd` launcher and `node dist\cli.js watch` kept running orphaned. They held `data\logs\watch.log` open, so the next start's `>>` redirect failed and the task returned to Ready.
+
+**Probe:** a throwaway Node process under `conhost --headless` → `cmd` saw an `EPIPE` error on its console stdin when conhost was killed, then exited, and cmd exited with it.
+
+**Fix:**
+- `watch --stop-on-stdin-close` (new, opt-in) aborts the watch on stdin `end`, `close` or `error`, then releases stdin so the process exits. It is opt-in because a launcher without stdin would otherwise stop the watcher immediately.
+- `scripts/watch-at-logon.cmd` passes the flag. Before starting, it waits up to about 3 minutes (90 tries, 2 s apart) for the log to be writable, because the previous watcher finishes any running scan or code graph build before it exits.
+- README: the flag and the new stop and restart behavior. `src/cli.ts`, `tests/watch.test.ts`.
+
+**Checks** (Node 24): build, typecheck and lint passed; 32/32 tests passed, including the new "CLI watch stops cleanly when its launcher's stdin closes" (exit 0, `stopped` logged, empty stderr).
+
+**Real task:**
+- **Stop 15 s after start:** the watcher finished its startup code graph build (36.7 s), logged `stopped` and exited. cmd exited too. No processes were left.
+- **Stop, then start 1 s later:** the old watcher logged `stopped` after its build. The waiting launcher started 1 s later. One watcher resulted, with a clean startup scan.
+
+Unresolved: a stop waits for an in-flight code graph build (about 40 s on GroceryOS) rather than cancelling it, to avoid partial graph output.

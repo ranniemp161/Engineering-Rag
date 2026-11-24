@@ -250,3 +250,41 @@ test("CLI watch streams JSON lines and stops cleanly", async (t) => {
   }
   assert.equal(stderr, "");
 });
+
+test("CLI watch stops cleanly when its launcher's stdin closes", async (t) => {
+  const { configFile } = await fixture(t);
+  const child = spawn(
+    process.execPath,
+    [
+      "src/cli.ts",
+      "watch",
+      "--reconcile",
+      "0",
+      "--no-code",
+      "--stop-on-stdin-close",
+    ],
+    {
+      env: { ...process.env, ENGINEERING_INTELLIGENCE_CONFIG: configFile },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const exited = new Promise<number | null>((resolve) =>
+    child.on("exit", (code) => resolve(code)),
+  );
+  t.after(() => {
+    child.kill();
+  });
+  await until(() => stdout.includes('"reason":"startup"'), "CLI startup");
+  child.stdin.end();
+  assert.equal(await exited, 0, stderr);
+  assert.match(stdout, /"event":"stopped"/);
+  assert.equal(stderr, "");
+});

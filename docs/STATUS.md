@@ -4,7 +4,7 @@ Updated 2026-11-24. **The MVP (Milestones 0–4) is complete. Post-MVP Milestone
 
 The MCP server now sends instructions on connect asking agents to search engineering knowledge before coding. Next action: restart the coding hosts and check whether agents search unprompted. [Server instructions](../README.md#local-mcp-server)
 
-The `shared` scope now points at an operator Obsidian vault outside the repository, with templates excluded from indexing. It is empty until the operator writes notes. Known gap: `Stop-ScheduledTask` leaves the `watch` node process running, so stop that process too before restarting the task. [Progress](PROGRESS.md)
+The `shared` scope now points at an operator Obsidian vault outside the repository, with templates excluded from indexing. It is empty until the operator writes notes. Stopping the logon task now stops the watcher too, after any in-progress scan or code graph build, and an immediate restart waits for it. [Progress](PROGRESS.md)
 
 `get_related_documents` lists the notes a document links to and the notes that link to it, from explicit links, wikilinks and decision numbers (index schema version 3). With `detectProject` enabled, MCP calls without `projectId` use the workspace's project. [Links and detection](../README.md#automatic-project-detection)
 

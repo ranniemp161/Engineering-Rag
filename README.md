@@ -49,7 +49,7 @@ pnpm dev -- watch
 pnpm dev -- watch --debounce 2000 --reconcile 30
 ```
 
-`watch` performs a startup scan of every scope, then rescans a scope about one second after its Markdown changes stop. It ignores excluded paths and files other than Markdown, so code edits in a project repository do not trigger rescans. Continuous changes are rescanned at least every 10 seconds. Each rescan is the same transactional scan as `index`, and the guard is held only while it runs, so the MCP server and viewer keep working. A busy index is retried, and a root that is missing or replaced is reattached without a restart. Every `--reconcile` minutes (default 15, `0` disables) it rescans all scopes to cover missed filesystem events. `--debounce` sets the quiet period in milliseconds (default 1000).
+`watch` performs a startup scan of every scope, then rescans a scope about one second after its Markdown changes stop. It ignores excluded paths and files other than Markdown, so code edits in a project repository do not trigger rescans. Continuous changes are rescanned at least every 10 seconds. Each rescan is the same transactional scan as `index`, and the guard is held only while it runs, so the MCP server and viewer keep working. A busy index is retried, and a root that is missing or replaced is reattached without a restart. Every `--reconcile` minutes (default 15, `0` disables) it rescans all scopes to cover missed filesystem events. `--debounce` sets the quiet period in milliseconds (default 1000). `--stop-on-stdin-close` stops the watcher cleanly when its standard input closes or its console goes away. Launchers use it so the watcher cannot outlive them; leave it off when standard input is not connected.
 
 Each event is printed as one JSON line on stdout (`watching`, `scan`, `embedded`, `code-watching`, `code-graph`, `busy`, `watch-error`, `error`, `stopped`). `watch` also refreshes code graphs; see [Code graph](#code-graph-graphify). Stop with Ctrl+C. Restart `watch` after editing the configuration. After a build, `node dist/cli.js watch` accepts the same flags.
 
@@ -64,7 +64,9 @@ $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" 
 Register-ScheduledTask -TaskName 'Engineering index watch' -Action $action -Trigger $trigger -Settings $settings -Principal $principal
 ```
 
-The task starts 30 seconds after logon, runs with normal user rights and no time limit, and restarts up to three times if it fails. Node and Graphify must be on the user's `PATH`. The task runs the built `dist\`, so run `pnpm build` after pulling changes, then restart the task. Manage it with `Start-ScheduledTask`, `Stop-ScheduledTask` and `Unregister-ScheduledTask -TaskName 'Engineering index watch'`. Stop the task before running `watch` by hand, or both will rebuild code graphs. The log is never rotated; delete it when it grows large.
+The task starts 30 seconds after logon, runs with normal user rights and no time limit, and restarts up to three times if it fails. Node and Graphify must be on the user's `PATH`. The task runs the built `dist\`, so run `pnpm build` after pulling changes, then restart the task. Manage it with `Start-ScheduledTask`, `Stop-ScheduledTask` and `Unregister-ScheduledTask -TaskName 'Engineering index watch'`.
+
+`Stop-ScheduledTask` ends only the `conhost` process. The launcher runs `watch --stop-on-stdin-close`, so the watcher notices its console closing and stops by itself. It first finishes any scan or code graph build in progress, which can take about 40 s, then logs `stopped`. A restart issued during that time waits up to about 3 minutes for the log file to be released, then starts. Check that only one `node dist\cli.js watch` process remains before running `watch` by hand, or both will rebuild code graphs. The log is never rotated; delete it when it grows large.
 
 ## Search indexed notes
 
