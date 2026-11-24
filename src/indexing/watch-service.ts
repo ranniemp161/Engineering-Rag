@@ -1,17 +1,15 @@
 import { type FSWatcher, watch } from "node:fs";
 import path from "node:path";
 import type { Config } from "../config/load-config.ts";
-import { IndexBusyError, withWriteSession } from "../storage/index-session.ts";
-import { embedPending } from "../semantic/embed-index.ts";
-import { type Embedder, getEmbedder } from "../semantic/embedder.ts";
+import { IndexBusyError } from "../storage/index-session.ts";
+import type { Embedder } from "../semantic/embedder.ts";
 import {
   type CodeWatchEvent,
   type CodeWatchOptions,
   startCodeGraphRefresh,
 } from "../code/code-watch.ts";
-import { indexNotes } from "./index-service.ts";
+import { refreshIndex, type ScanSummary } from "./index-service.ts";
 
-type ScanSummary = Awaited<ReturnType<typeof indexNotes>>[number];
 
 export type WatchEvent =
   | { event: "watching"; scope: string; root: string }
@@ -116,26 +114,13 @@ export async function watchNotes(config: Config, options: WatchOptions) {
   const scan = async (batch: Map<string, Reason>) => {
     const scopes = [...batch.keys()];
     try {
-      // Loaded before taking the guard; a missing model leaves keyword indexing working.
-      let embedder: Embedder | undefined;
-      if (config.semantic)
-        embedder =
-          options.embedder ??
-          (await getEmbedder(config.semantic).catch((error: Error) => {
-            report({ event: "error", scopes, message: `Embeddings not updated: ${error.message}` });
-            return undefined;
-          }));
-      let embedding: Awaited<ReturnType<typeof embedPending>> | undefined;
-      const results = await withWriteSession(config, scopes, async (session) => {
-        const { db } = session;
-        const scanned = await indexNotes(session, config);
-        if (embedder)
-          embedding = await embedPending(db, embedder).catch((error: Error) => {
-            report({ event: "error", scopes, message: `Embeddings not updated: ${error.message}` });
-            return undefined;
-          });
-        return scanned;
-      });
+      const { scans: results, embedding } = await refreshIndex(
+        config,
+        { kind: "scopes", ids: scopes },
+        { embedder: options.embedder },
+      );
+      if (embedding.status === "failed")
+        report({ event: "error", scopes, message: `Embeddings not updated: ${embedding.message}` });
       // A watcher can keep following a root that was moved away (Windows does
       // not report it), so an unavailable root is reattached by path.
       for (const result of results)
@@ -152,7 +137,7 @@ export async function watchNotes(config: Config, options: WatchOptions) {
           reason,
           results: results.filter((r) => batch.get(r.scope) === reason),
         });
-      if (embedding?.embedded)
+      if (embedding.status === "updated" && embedding.embedded)
         report({
           event: "embedded",
           model: embedding.model,

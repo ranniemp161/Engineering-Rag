@@ -389,3 +389,18 @@ Not chosen, left as review notes:
 PR #3 merged into `main` as `1ef89c3` (merge commit; GitGuardian check passed). Ran `pnpm build` on `main`, then restarted the `Engineering index watch` task: the previous watcher logged `stopped`, exactly one new `watch` process started, and its startup scan completed for both scopes with no errors and no updates. The `index-session` branch remains on GitHub.
 
 Unresolved: Node 24 LTS checks.
+
+### One index refresh operation for the CLI and the watcher
+
+Took architecture candidate 2 through a design interview and implemented it on branch `refresh-index`, test-first.
+- **Operation:** `refreshIndex(config, request, { embedder?, embedBatchSize? })` in `src/indexing/index-service.ts`. The request is `{kind:"all"}`, `{kind:"scopes", ids}` or `{kind:"rebuild"}`, so a partial rebuild cannot be expressed. It loads the model before taking the index guard, scans, then embeds. The result is `{ scans, embedding }`, where `embedding` is `off`, `updated` with counts, or `failed` at the `model` or `embed` stage. Index session errors (busy, moved root) still throw. `indexNotes` is now private.
+- **Callers:** the `index`/`rebuild` commands and watch scans call it and only format the result. Exit codes, stderr messages and watch events are unchanged. The one exception: in watch, a model-load failure is now reported after the scan rather than before it.
+- **Tests:**
+  - New `tests/refresh.test.ts` (6 cases): named scopes only, rebuild, embedding off/updated, model failure with keyword search still working, embedder failure keeping the committed scan, busy index. The first case was written red; the other five passed on first run against the implementation.
+  - The fake embedder moved to `tests/fake-embedder.ts`.
+  - New `buildIndex(configFile)` in `tests/index-access.ts` replaces spawning `cli.ts index` for fixture setup in the eval, links, MCP and search suites. The CLI suite in `tests/index.test.ts` still spawns the CLI.
+- **Docs:** `GLOSSARY.md` gains "Index refresh".
+
+**Checks** (Node 26.12.1): build, typecheck and lint passed; 49/49 tests passed; the compiled MCP protocol test passed.
+
+Unresolved: Node 24 LTS checks. Architecture candidates 3–6 remain.

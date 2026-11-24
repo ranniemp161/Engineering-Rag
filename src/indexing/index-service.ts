@@ -8,9 +8,12 @@ import {
   type ScanError,
 } from "../filesystem/markdown-reader.ts";
 import { parseMarkdown } from "../markdown/chunk-markdown.ts";
+import { embedPending } from "../semantic/embed-index.ts";
+import { type Embedder, getEmbedder } from "../semantic/embedder.ts";
 import {
   type IndexSession,
   type WriteSession,
+  withWriteSession,
   writeReferences,
 } from "../storage/index-session.ts";
 
@@ -139,11 +142,74 @@ async function scanScope(
   };
 }
 
+/** Which scopes an index refresh covers. A rebuild always covers every scope. */
+export type RefreshRequest =
+  | { kind: "all" }
+  | { kind: "scopes"; ids: readonly string[] }
+  | { kind: "rebuild" };
+
+export type ScanSummary = Awaited<ReturnType<typeof indexNotes>>[number];
+
+/** Embedding outcome of a refresh. Failures leave the committed scan in place. */
+export type EmbeddingOutcome =
+  | { status: "off" }
+  | ({ status: "updated" } & Awaited<ReturnType<typeof embedPending>>)
+  | { status: "failed"; stage: "model" | "embed"; message: string };
+
+export type RefreshResult = { scans: ScanSummary[]; embedding: EmbeddingOutcome };
+
+/**
+ * Scans the requested scopes, then embeds new passages when `semantic` is
+ * configured. The model loads before the index guard is taken, so a slow or
+ * missing model never holds the index. Scan errors and embedding failures are
+ * returned; index session errors such as a busy index or moved root throw.
+ */
+export async function refreshIndex(
+  config: Config,
+  request: RefreshRequest,
+  options: { embedder?: Embedder; embedBatchSize?: number } = {},
+): Promise<RefreshResult> {
+  // Embeddings run only when configured; an injected embedder replaces loading the model.
+  let embedder: Embedder | undefined;
+  let modelFailure: string | undefined;
+  if (config.semantic)
+    embedder =
+      options.embedder ??
+      (await getEmbedder(config.semantic).catch((error: Error) => {
+        modelFailure = error.message;
+        return undefined;
+      }));
+  const ids =
+    request.kind === "scopes" ? request.ids : config.scopes.map((scope) => scope.id);
+  const rebuild = request.kind === "rebuild";
+  return withWriteSession(
+    config,
+    ids,
+    async (session) => {
+      const scans = await indexNotes(session, config);
+      let embedding: EmbeddingOutcome = { status: "off" };
+      if (modelFailure !== undefined)
+        embedding = { status: "failed", stage: "model", message: modelFailure };
+      else if (embedder)
+        embedding = await embedPending(session.db, embedder, options.embedBatchSize).then(
+          (counts): EmbeddingOutcome => ({ status: "updated", ...counts }),
+          (error: Error): EmbeddingOutcome => ({
+            status: "failed",
+            stage: "embed",
+            message: error.message,
+          }),
+        );
+      return { scans, embedding };
+    },
+    { rebuild },
+  );
+}
+
 /**
  * Scans the scopes the write session was opened for; their roots are already
  * verified. A rebuild replaces every configured scope in one transaction.
  */
-export async function indexNotes(session: WriteSession, config: Config) {
+async function indexNotes(session: WriteSession, config: Config) {
   const { db, rebuild } = session;
   const scopeIds = new Set(session.scopeIds);
   const scopes = config.scopes.filter((scope) => scopeIds.has(scope.id));

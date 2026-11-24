@@ -15,7 +15,7 @@ import { extractReferences } from "../src/markdown/references.ts";
 import { detectProject } from "../src/mcp/project-detection.ts";
 import { getRelatedDocuments } from "../src/retrieval/related.ts";
 import { IndexUpgradeNeededError } from "../src/storage/index-session.ts";
-import { readIndex, writeIndex } from "./index-access.ts";
+import { buildIndex, readIndex, writeIndex } from "./index-access.ts";
 
 test("reference extraction covers links, wikilinks and numbers but not code or dates", () => {
   const source = [
@@ -79,11 +79,8 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   };
   await writeFile(configFile, JSON.stringify(raw));
   const env = { ...process.env, ENGINEERING_INTELLIGENCE_CONFIG: configFile };
-  const index = () => {
-    const run = spawnSync(process.execPath, ["src/cli.ts", "index"], { env, encoding: "utf8" });
-    assert.equal(run.status, 0, run.stderr);
-  };
-  index();
+  const index = () => buildIndex(configFile);
+  await index();
   const config = await loadConfig(configFile);
   const idOf = (scope: string, relativePath: string) =>
     readIndex(config.databasePath, ({ db }) =>
@@ -140,12 +137,12 @@ test("related documents resolve within visible scopes in both directions", async
   // Editing a note replaces its references; a note added later resolves without
   // rescanning the notes that already pointed at it.
   await writeFile(path.join(dir, "pilot", "PLAN.md"), "# Plan\nNo references now. [[Later]]\n");
-  index();
+  await index();
   assert.deepEqual((await related("pilot", "decisions/0002-second.md", "pilot")).in, [
     "pilot:decisions/0001-first.md@2",
   ]);
   await writeFile(path.join(dir, "pilot", "Later.md"), "# Later\n");
-  index();
+  await index();
   assert.deepEqual((await related("pilot", "Later.md", "pilot")).in, ["pilot:PLAN.md@2"]);
   const cli = spawnSync(
     process.execPath,
@@ -169,7 +166,7 @@ test("an older index gains references on its next write without rescanning notes
       error.message ===
         "Links are unavailable until the index is upgraded. Run the index command.",
   );
-  index();
+  await index();
   assert.deepEqual((await related("pilot", "decisions/0001-first.md", "pilot")).out, [
     "pilot:decisions/0002-second.md@2",
     "shared:Glossary.md@3",

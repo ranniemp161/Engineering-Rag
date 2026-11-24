@@ -1,9 +1,9 @@
 import { buildCodeGraph } from "./code/build-graph.ts";
 import { getCodeImpact, searchCodeGraph } from "./code/code-graph.ts";
 import { loadConfig } from "./config/load-config.ts";
-import { indexNotes, indexStatus } from "./indexing/index-service.ts";
+import { indexStatus, refreshIndex } from "./indexing/index-service.ts";
 import { watchNotes } from "./indexing/watch-service.ts";
-import { withReadSession, withWriteSession } from "./storage/index-session.ts";
+import { withReadSession } from "./storage/index-session.ts";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -15,12 +15,7 @@ import {
 import { parseArgs } from "node:util";
 import { getRelatedDocuments } from "./retrieval/related.ts";
 import { searchKnowledge } from "./retrieval/search-service.ts";
-import { embedPending } from "./semantic/embed-index.ts";
-import {
-  type Embedder,
-  fetchModel,
-  getEmbedder,
-} from "./semantic/embedder.ts";
+import { fetchModel } from "./semantic/embedder.ts";
 
 function parseMode(value: string | undefined) {
   if (value === undefined || value === "keyword" || value === "hybrid")
@@ -238,34 +233,15 @@ try {
     });
     console.log(JSON.stringify(output, null, 2));
   } else {
-    // Load the model before taking the index guard; failure does not block indexing.
-    let embedder: Embedder | undefined;
-    let embedFailure: string | undefined;
-    if (config.semantic)
-      embedder = await getEmbedder(config.semantic).catch((error: Error) => {
-        embedFailure = error.message;
-        return undefined;
-      });
-    const rebuild = command === "rebuild";
-    const output = await withWriteSession(
+    const result = await refreshIndex(
       config,
-      config.scopes.map((scope) => scope.id),
-      async (session) => {
-        const { db } = session;
-        const result = await indexNotes(session, config);
-        if (result.some((scope) => scope.errors.length)) process.exitCode = 1;
-        if (embedder)
-          await embedPending(db, embedder).catch((error: Error) => {
-            embedFailure = error.message;
-          });
-        return result;
-      },
-      { rebuild },
+      command === "rebuild" ? { kind: "rebuild" } : { kind: "all" },
     );
-    console.log(JSON.stringify(output, null, 2));
-    if (embedFailure) {
+    console.log(JSON.stringify(result.scans, null, 2));
+    if (result.scans.some((scan) => scan.errors.length)) process.exitCode = 1;
+    if (result.embedding.status === "failed") {
       // Keyword indexing committed; embeddings resume on the next run.
-      console.error(`Embeddings not updated: ${embedFailure}`);
+      console.error(`Embeddings not updated: ${result.embedding.message}`);
       process.exitCode = 1;
     }
   }

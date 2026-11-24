@@ -2,6 +2,8 @@
 
 Updated 2026-11-24. **The MVP (Milestones 0–4) is complete. Post-MVP Milestones 5 (automatic refresh) and 6 (retrieval evaluation) are complete and awaiting review. Milestone 7 (hybrid retrieval) is complete. Milestone 8 (explicit note links and project detection) is complete. Milestone 9 (Graphify code graph adapter) is complete and awaiting review. All future extensions in the specification except packaging and remote transport are now delivered.**
 
+Branch `refresh-index` (uncommitted, awaiting review): the `index` and `rebuild` commands and the watcher now share one index refresh operation (`refreshIndex`), which returns scan and embedding outcomes as values. 49/49 tests pass. Next action: the operator reviews the diff. [Handoff](HANDOFF.md)
+
 Every index access now goes through one index session module (`src/storage/index-session.ts`), which owns the guard, schema upgrade, capabilities and scope root checks (PR #3, merged 2026-11-24). Read-only opens of a missing index create nothing. The viewer shows index and validation errors, returns 503 for a busy index, and hides anything else behind a generic 500. 43/43 tests pass on Node 26.12.1. The watch task was restarted on the new build, and its startup scan completed with no errors. Open: rerun the locking and native FTS checks on Node 24 LTS, which is not installed on this machine. Remaining architecture candidates 2–6 are listed in the progress history. [Progress](PROGRESS.md) · [Glossary](../GLOSSARY.md)
 
 The MCP server now sends instructions on connect asking agents to search engineering knowledge before coding. Next action: restart the coding hosts and check whether agents search unprompted. [Server instructions](../README.md#local-mcp-server)

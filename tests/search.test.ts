@@ -14,6 +14,7 @@ import { test } from "node:test";
 import { loadConfig } from "../src/config/load-config.ts";
 import { searchKnowledge } from "../src/retrieval/search-service.ts";
 import { UnknownScopeError } from "../src/storage/index-session.ts";
+import { buildIndex } from "./index-access.ts";
 
 test("ranked CLI search enforces project boundaries before limiting and cites literal source", async (t) => {
   const dir = await realpath(
@@ -60,7 +61,7 @@ test("ranked CLI search enforces project boundaries before limiting and cites li
     searchKnowledge(config, { query: "audit" }),
     /Index missing/,
   );
-  cli(["index"]);
+  await buildIndex(configFile);
   const ranked = await searchKnowledge(config, {
     query: "audit",
     projectId: "a",
@@ -149,7 +150,7 @@ test("ranked CLI search enforces project boundaries before limiting and cites li
     "z".repeat(150),
   ].join("\n");
   await writeFile(path.join(dir, "shared", "wrapped.md"), wrap);
-  cli(["index"]);
+  await buildIndex(configFile);
   const overlap = await searchKnowledge(config, { query: "overlapmarker" });
   assert.equal(overlap.results.length, 1);
   assert.match(overlap.results[0]?.snippet ?? "", /overlapmarker/);

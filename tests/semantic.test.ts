@@ -6,41 +6,11 @@ import path from "node:path";
 import { test } from "node:test";
 import { type Config, loadConfig } from "../src/config/load-config.ts";
 import { runEvaluation } from "../src/evaluation/evaluate.ts";
-import { indexNotes, indexStatus } from "../src/indexing/index-service.ts";
+import { indexStatus, refreshIndex } from "../src/indexing/index-service.ts";
 import { fuseRankings, searchKnowledge } from "../src/retrieval/search-service.ts";
-import { embedPending } from "../src/semantic/embed-index.ts";
 import { type Embedder, getEmbedder } from "../src/semantic/embedder.ts";
-import { withWriteSession } from "../src/storage/index-session.ts";
+import { fakeEmbedder } from "./fake-embedder.ts";
 import { readIndex, writeIndex } from "./index-access.ts";
-
-// Words in one group share a dimension, standing in for learned synonyms.
-const CONCEPTS = [
-  ["undo", "reverse", "reversal", "reversing", "cancel"],
-  ["owe", "debt", "unpaid", "owed"],
-  ["hosted", "region", "server", "singapore"],
-  ["copied", "backup", "backups", "cloud"],
-];
-
-function fakeEmbedder(model = "fake-model") {
-  const calls: string[][] = [];
-  const embedder: Embedder = {
-    model,
-    async embed(texts) {
-      calls.push(texts);
-      return texts.map((text) => {
-        const vector = new Float32Array(CONCEPTS.length + 1);
-        for (const word of text.toLowerCase().match(/\p{L}+/gu) ?? []) {
-          const concept = CONCEPTS.findIndex((group) => group.includes(word));
-          const slot = concept < 0 ? CONCEPTS.length : concept;
-          vector[slot] = (vector[slot] ?? 0) + (concept < 0 ? 0.05 : 1);
-        }
-        const norm = Math.hypot(...vector) || 1;
-        return vector.map((x) => x / norm);
-      });
-    },
-  };
-  return { embedder, calls, texts: () => calls.flat() };
-}
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const dir = await mkdtemp(path.join(tmpdir(), "engineering-semantic-"));
@@ -77,12 +47,16 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   };
   await writeFile(configFile, JSON.stringify(raw));
   const config = await loadConfig(configFile, { allowUnavailableRoots: true });
-  const index = (embedder: Embedder) =>
-    withWriteSession(config, config.scopes.map((s) => s.id), async (session) => {
-      const { db } = session;
-      const scans = await indexNotes(session, config);
-      return { scans, embedding: await embedPending(db, embedder, 2) };
-    });
+  const index = async (embedder: Embedder) => {
+    const { scans, embedding } = await refreshIndex(
+      config,
+      { kind: "all" },
+      { embedder, embedBatchSize: 2 },
+    );
+    if (embedding.status !== "updated")
+      throw new Error(`Expected embeddings to update: ${JSON.stringify(embedding)}`);
+    return { scans, embedding };
+  };
   const search = (
     query: string,
     embedder: Embedder,

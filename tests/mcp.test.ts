@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { readIndex } from "./index-access.ts";
+import { buildIndex, readIndex } from "./index-access.ts";
 
 test("stdio client discovers both tools and reads bounded, scoped indexed evidence", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "engineering-mcp-"));
@@ -35,13 +34,7 @@ test("stdio client discovers both tools and reads bounded, scoped indexed eviden
     );
   }
   const env = { ENGINEERING_INTELLIGENCE_CONFIG: configPath };
-  const index = () => {
-    const p = spawnSync(process.execPath, ["src/cli.ts", "index"], {
-      env: { ...process.env, ...env },
-      encoding: "utf8",
-    });
-    assert.equal(p.status, 0, p.stderr);
-  };
+  const index = () => buildIndex(configPath);
   const client = new Client({ name: "fixture-reader", version: "1" });
   const protocolErrors: Error[] = [];
   client.onerror = (error) => protocolErrors.push(error);
@@ -92,7 +85,7 @@ test("stdio client discovers both tools and reads bounded, scoped indexed eviden
     const search = "search_engineering_knowledge",
       get = "get_document";
     assert.match(await call(search, { query: "audit" }, true), /Index missing/);
-    index();
+    await index();
     const { results } = await call(search, { query: "audit" });
     assert.deepEqual(
       results.map((r: { scope: string }) => r.scope),
@@ -144,7 +137,7 @@ test("stdio client discovers both tools and reads bounded, scoped indexed eviden
     await readIndex(databasePath, async () =>
       assert.match(await call(get, read, true), /INDEX_BUSY/),
     );
-    index();
+    await index();
     assert.equal((await call(get, read)).text, "# Edited\naudit replacement");
     await writeFile(
       configPath,

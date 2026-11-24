@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { buildIndex } from "./index-access.ts";
 import { startViewer } from "./start-viewer.ts";
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
@@ -43,7 +44,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
     assert.equal(run.status, exit, run.stderr + run.stdout);
     return { out: run.stdout ? JSON.parse(run.stdout) : undefined, err: run.stderr };
   };
-  cli(["index"]);
+  await buildIndex(config);
   const cases = path.join(dir, "cases.json");
   const writeCases = (items: unknown[]) =>
     writeFile(cases, JSON.stringify({ cases: items }));
@@ -78,7 +79,7 @@ const standardCases = [
 ];
 
 test("eval scores ranks, line constraints and groups, and flags regressions against a baseline", async (t) => {
-  const { dir, roots, cli, cases, writeCases } = await fixture(t);
+  const { dir, roots, config, cli, cases, writeCases } = await fixture(t);
   await writeCases(standardCases);
   const baseline = path.join(dir, "baseline.json");
   const { out: report } = cli(["eval", "--file", cases, "--output", baseline]);
@@ -118,7 +119,7 @@ test("eval scores ranks, line constraints and groups, and flags regressions agai
 
   // Removing the passage makes the project case fall out of the top 5.
   await writeFile(path.join(roots.pilot, "decision.md"), "# Decision\nreworded\n");
-  cli(["index"]);
+  await buildIndex(config);
   const { out: after } = cli(["eval", "--file", cases, "--baseline", baseline], 1);
   assert.deepEqual(after.comparison.regressions, [
     { id: "project-hit", before: 1, after: null },

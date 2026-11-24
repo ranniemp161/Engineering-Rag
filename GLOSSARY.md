@@ -9,3 +9,5 @@ Domain terms for the Engineering Intelligence Engine. Use these words in code, t
 **Index session**: one guarded use of the local index, read or write, opened through `src/storage/index-session.ts`. It owns the lock, schema upgrade and scope root checks, so callers never open the database directly.
 
 **Index capability**: a schema feature an index session reports, such as `embeddings` or `references`. Older indexes opened read-only lack newer capabilities until the next write upgrades them. _Avoid_: schema version (internal to the index session).
+
+**Index refresh**: one update of the index: scan the requested scopes (all, named ones, or a rebuild of every scope), then embed new passages when semantic search is configured. `refreshIndex` in `src/indexing/index-service.ts` is the only way to run one; the `index` and `rebuild` commands and the watcher all call it. Scan errors and embedding failures are part of its result, not exceptions.
