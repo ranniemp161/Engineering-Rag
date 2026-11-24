@@ -43,20 +43,28 @@ export type WriteSession = IndexSession & {
 
 /**
  * Opens the index read-only under the shared guard. A missing index creates
- * nothing. Throws IndexRootChangedError when an indexed root of `scopeIds`
- * no longer matches the configuration.
+ * nothing: it returns `whenMissing()` when given, and otherwise throws
+ * IndexMissingError. Throws IndexRootChangedError when an indexed root of
+ * `scopeIds` no longer matches the configuration.
  */
-export async function withReadSession<T>(
+export async function withReadSession<T, M = never>(
   config: SessionConfig,
   scopeIds: readonly string[],
   operation: (session: IndexSession) => Promise<T>,
-): Promise<T> {
+  options: { whenMissing?: () => M } = {},
+): Promise<T | M> {
   knownScopes(config, scopeIds);
-  await access(config.databasePath).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT")
-      throw new IndexMissingError("Index missing. Run the index command first.");
-    throw error;
-  });
+  const present = await access(config.databasePath).then(
+    () => true,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+      return false;
+    },
+  );
+  if (!present) {
+    if (options.whenMissing) return options.whenMissing();
+    throw new IndexMissingError("Index missing. Run the index command first.");
+  }
   return guarded(config.databasePath, true, async (db) => {
     const capabilities = capabilitiesOf(await migrate(db, true));
     await verifyRoots(db, config, scopeIds, () =>

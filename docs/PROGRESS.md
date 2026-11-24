@@ -338,8 +338,6 @@ A two-axis review of PR #3 (standards and agreed design) found gaps; fixed on th
 
 Unresolved, and left for the operator:
 - Rerun the checks on Node 24 LTS.
-- CLI `status` catching "index missing" as an exception rather than a result type.
-- Repeated `{ databasePath, scopes: [] }` setup in tests.
 - Viewer validation messages hidden behind the generic message.
 
 ### Removed the viewer test port race
@@ -349,3 +347,10 @@ The viewer tests picked a free port, closed it, then started the viewer on it, s
 - **Tests:** new helper `tests/start-viewer.ts` starts the viewer on port 0 and waits for stderr lines as events, rejecting if the viewer exits or after a timeout. `tests/viewer.test.ts` and the viewer test in `tests/eval.test.ts` use it; both `freePort()` copies are gone.
 
 **Checks** (Node 26.12.1): build, typecheck and lint passed; 41/41 tests passed; the two viewer suites passed three runs in a row.
+
+### Status without exceptions; shared test index access
+
+- **CLI `status`:** a missing index is an expected outcome, so it no longer travels as an exception. `withReadSession` takes an optional `whenMissing` fallback, returned instead of throwing `IndexMissingError`; `status` uses it to print `{initialized:false}`. Without the option, behaviour is unchanged (retrieval and the viewer still report "Index missing").
+- **Tests:** new helper `tests/index-access.ts` (`readIndex`, `writeIndex`) replaces the repeated `{ databasePath, scopes: [] }, []` setup in the index, links, MCP, semantic and watch suites. New session test: the fallback is returned for a missing index, creates nothing, and is ignored once the index exists.
+
+**Checks** (Node 26.12.1): build, typecheck and lint passed; 42/42 tests passed; the compiled MCP protocol test passed.

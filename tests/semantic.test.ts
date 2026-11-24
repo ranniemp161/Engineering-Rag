@@ -10,7 +10,8 @@ import { indexNotes, indexStatus } from "../src/indexing/index-service.ts";
 import { fuseRankings, searchKnowledge } from "../src/retrieval/search-service.ts";
 import { embedPending } from "../src/semantic/embed-index.ts";
 import { type Embedder, getEmbedder } from "../src/semantic/embedder.ts";
-import { withReadSession, withWriteSession } from "../src/storage/index-session.ts";
+import { withWriteSession } from "../src/storage/index-session.ts";
+import { readIndex, writeIndex } from "./index-access.ts";
 
 // Words in one group share a dimension, standing in for learned synonyms.
 const CONCEPTS = [
@@ -185,7 +186,7 @@ test("hybrid search finds paraphrases, keeps scopes isolated and re-embeds only 
   await rm(path.join(roots.pilot, "hosting.md"));
   const removed = await index(fake.embedder);
   assert.equal(removed.embedding.vectors, removed.embedding.chunks);
-  const status = await withReadSession({ databasePath: config.databasePath, scopes: [] }, [], indexStatus);
+  const status = await readIndex(config.databasePath, indexStatus);
   const pilot = status.scopes.find((s) => s.id === "pilot");
   assert.deepEqual(pilot?.embeddings, { "fake-model": pilot?.chunks });
 
@@ -200,7 +201,7 @@ test("schema 1 indexes stay searchable read-only and upgrade on the next write",
   const { config, index, search } = await fixture(t);
   const fake = fakeEmbedder();
   await index(fake.embedder);
-  await withWriteSession({ databasePath: config.databasePath, scopes: [] }, [], async ({ db }) => {
+  await writeIndex(config.databasePath, async ({ db }) => {
     await db.exec("DROP TABLE chunk_embeddings");
     await db.exec("DROP TABLE document_references");
     await db.exec("UPDATE engineering_index_version SET version = 1");
@@ -216,7 +217,7 @@ test("schema 1 indexes stay searchable read-only and upgrade on the next write",
   );
   const upgraded = await index(fake.embedder);
   assert.equal(upgraded.embedding.embedded, upgraded.embedding.chunks);
-  const version = await withReadSession({ databasePath: config.databasePath, scopes: [] }, [], ({ db }) =>
+  const version = await readIndex(config.databasePath, ({ db }) =>
     db.get("SELECT version FROM engineering_index_version"),
   );
   assert.equal(version?.version, 3);

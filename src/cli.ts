@@ -3,11 +3,7 @@ import { getCodeImpact, searchCodeGraph } from "./code/code-graph.ts";
 import { loadConfig } from "./config/load-config.ts";
 import { indexNotes, indexStatus } from "./indexing/index-service.ts";
 import { watchNotes } from "./indexing/watch-service.ts";
-import {
-  IndexMissingError,
-  withReadSession,
-  withWriteSession,
-} from "./storage/index-session.ts";
+import { withReadSession, withWriteSession } from "./storage/index-session.ts";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -237,13 +233,9 @@ try {
     );
     console.log(JSON.stringify(output, null, 2));
   } else if (command === "status") {
-    const output = await withReadSession(config, [], indexStatus).catch(
-      (error: Error) => {
-        if (error instanceof IndexMissingError)
-          return { initialized: false, scopes: [] };
-        throw error;
-      },
-    );
+    const output = await withReadSession(config, [], indexStatus, {
+      whenMissing: () => ({ initialized: false, scopes: [] }),
+    });
     console.log(JSON.stringify(output, null, 2));
   } else {
     // Load the model before taking the index guard; failure does not block indexing.

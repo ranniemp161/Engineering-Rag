@@ -41,6 +41,20 @@ test("a read session on a missing index reports it and creates no files", async 
   assert.deepEqual(await readdir(dir), []);
 });
 
+test("a read session can return a fallback for a missing index instead of failing", async (t) => {
+  const { dir, config } = await fixture(t);
+  const status = await withReadSession(config, [], async () => "opened", {
+    whenMissing: () => "missing",
+  });
+  assert.equal(status, "missing");
+  assert.deepEqual(await readdir(dir), []);
+  await withWriteSession(config, [], async () => {});
+  assert.equal(
+    await withReadSession(config, [], async () => "opened", { whenMissing: () => "missing" }),
+    "opened",
+  );
+});
+
 test("a write session creates the schema with every capability", async (t) => {
   const { config } = await fixture(t);
   const written = await withWriteSession(config, ["shared"], async (s) => s.capabilities);

@@ -16,7 +16,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { parseMarkdown } from "../src/markdown/chunk-markdown.ts";
 import { readNote } from "../src/filesystem/markdown-reader.ts";
-import { withReadSession, } from "../src/storage/index-session.ts";
+import { readIndex } from "./index-access.ts";
 
 test("chunk bounds, heading ancestry, fences and line citations", () => {
   const lines = [
@@ -104,7 +104,7 @@ test("CLI maintains the local index, isolates failed scans and rolls back incomp
     return run.stdout ? JSON.parse(run.stdout) : run.stderr;
   };
   const match = (term: string) =>
-    withReadSession({ databasePath: file, scopes: [] }, [], ({ db }) =>
+    readIndex(file, ({ db }) =>
       db.all(
         "SELECT document_id,content,start_line,end_line FROM chunks WHERE fts_match(content,?1) ORDER BY fts_score(content,?1) DESC",
         term,
@@ -120,7 +120,7 @@ test("CLI maintains the local index, isolates failed scans and rolls back incomp
   assert.deepEqual(await match("excluded"), []);
   const [old] = await match("legacyterm");
   assert.equal(old.start_line, 5);
-  const meta = await withReadSession({ databasePath: file, scopes: [] }, [], ({ db }) =>
+  const meta = await readIndex(file, ({ db }) =>
     db.get("SELECT title,tags FROM documents WHERE id=?", old.document_id),
   );
   assert.equal(meta.title, "Review");
@@ -162,7 +162,7 @@ test("CLI maintains the local index, isolates failed scans and rolls back incomp
   assert.equal(report.documents, 0);
   assert.equal(report.chunks, 0);
   assert.ok(report.lastSuccess);
-  await withReadSession({ databasePath: file, scopes: [] }, [], async () => {
+  await readIndex(file, async () => {
     assert.match(cli("index", 1), /INDEX_BUSY/);
   });
 });

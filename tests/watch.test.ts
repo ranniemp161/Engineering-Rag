@@ -10,7 +10,7 @@ import {
   type WatchEvent,
   watchNotes,
 } from "../src/indexing/watch-service.ts";
-import { withReadSession, } from "../src/storage/index-session.ts";
+import { readIndex } from "./index-access.ts";
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const dir = await mkdtemp(path.join(tmpdir(), "engineering-watch-"));
@@ -31,7 +31,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   );
   const config = await loadConfig(configFile, { allowUnavailableRoots: true });
   const paths = (term: string) =>
-    withReadSession({ databasePath: config.databasePath, scopes: [] }, [], async ({ db }) =>
+    readIndex(config.databasePath, async ({ db }) =>
       (
         await db.all(
           `SELECT DISTINCT d.scope_id || ':' || d.relative_path AS key FROM chunks c
@@ -122,7 +122,7 @@ test("watch applies note changes, ignores excluded and non-Markdown files, debou
   assert.equal(scans().length - before, 1);
 
   // A busy index is retried after the lock is released.
-  await withReadSession({ databasePath: config.databasePath, scopes: [] }, [], async () => {
+  await readIndex(config.databasePath, async () => {
     await writeFile(path.join(shared, "locked.md"), "lockedterm");
     await until(() => events.some((e) => e.event === "busy"), "busy report");
   });
