@@ -17,7 +17,12 @@ const schema = z.strictObject({
         repositories: z.array(text).max(20).optional(),
         // Graphify code graph: the checkout it reads and the directory it writes.
         codeGraph: z
-          .strictObject({ repository: text.optional(), output: text })
+          .strictObject({
+            repository: text.optional(),
+            output: text,
+            // Also regenerate graph.html, GRAPH_REPORT.md and GRAPH_TREE.html on each build.
+            visualize: z.boolean().optional(),
+          })
           .optional(),
       }),
     )

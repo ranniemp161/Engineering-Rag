@@ -4,6 +4,11 @@ import type { Config } from "../config/load-config.ts";
 import { IndexBusyError, migrate, withIndex } from "../storage/turso.ts";
 import { embedPending } from "../semantic/embed-index.ts";
 import { type Embedder, getEmbedder } from "../semantic/embedder.ts";
+import {
+  type CodeWatchEvent,
+  type CodeWatchOptions,
+  startCodeGraphRefresh,
+} from "../code/code-watch.ts";
 import { indexNotes } from "./index-service.ts";
 
 type ScanSummary = Awaited<ReturnType<typeof indexNotes>>[number];
@@ -19,6 +24,7 @@ export type WatchEvent =
   | { event: "embedded"; model: string; embedded: number; vectors: number; chunks: number }
   | { event: "busy"; scopes: string[]; retryMs: number }
   | { event: "error"; scopes: string[]; message: string }
+  | CodeWatchEvent
   | { event: "stopped" };
 
 export interface WatchOptions {
@@ -34,6 +40,12 @@ export interface WatchOptions {
   retryMs?: number;
   /** Overrides the configured embedding model, for example in tests. */
   embedder?: Embedder;
+  /** Rebuild code graphs after source changes (default true when any project has one). */
+  code?: boolean;
+  /** Quiet period after the last code change before a code graph rebuild. */
+  codeDebounceMs?: number;
+  /** Replaces the Graphify build, for example in tests. */
+  codeBuild?: CodeWatchOptions["build"];
 }
 
 type Reason = Extract<WatchEvent, { event: "scan" }>["reason"];
@@ -231,6 +243,15 @@ export async function watchNotes(config: Config, options: WatchOptions) {
     "startup",
     0,
   );
+  const code =
+    options.code === false
+      ? undefined
+      : startCodeGraphRefresh(config, {
+          report,
+          debounceMs: options.codeDebounceMs,
+          retryMs,
+          build: options.codeBuild,
+        });
   if (reconcileMs > 0)
     reconcileTimer = setInterval(() => {
       // Renew watchers so a replaced root directory is followed by path.
@@ -240,6 +261,7 @@ export async function watchNotes(config: Config, options: WatchOptions) {
         "reconcile",
         0,
       );
+      code?.reconcile();
     }, reconcileMs);
 
   await new Promise<void>((resolve) => {
@@ -250,6 +272,6 @@ export async function watchNotes(config: Config, options: WatchOptions) {
   clearInterval(reconcileTimer);
   for (const timer of attachTimers.values()) clearTimeout(timer);
   for (const id of [...watchers.keys()]) detach(id);
-  await running;
+  await Promise.all([running, code?.stop()]);
   report({ event: "stopped" });
 }

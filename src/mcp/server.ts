@@ -127,7 +127,7 @@ server.registerTool(
   "get_code_impact",
   {
     description:
-      "From a code graph node, list what depends on it (direction 'dependents', the default: callers, importers, subclasses — what a change can break) or what it depends on ('dependencies'), up to depth 4. Each hit cites the call or import site and whether Graphify extracted or inferred the edge.",
+      "From a code graph node (a nodeId from search_code_graph, or an exact function, type or file name), list what depends on it (direction 'dependents', the default: callers, importers, subclasses — what a change can break) or what it depends on ('dependencies'), up to depth 4. Each hit cites the call or import site and whether Graphify extracted or inferred the edge.",
     inputSchema: codeImpactInput,
     annotations: { readOnlyHint: true, openWorldHint: false },
   },

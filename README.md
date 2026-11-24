@@ -51,14 +51,20 @@ pnpm dev -- watch --debounce 2000 --reconcile 30
 
 `watch` performs a startup scan of every scope, then rescans a scope about one second after its Markdown changes stop. It ignores excluded paths and files other than Markdown, so code edits in a project repository do not trigger rescans. Continuous changes are rescanned at least every 10 seconds. Each rescan is the same transactional scan as `index`, and the guard is held only while it runs, so the MCP server and viewer keep working. A busy index is retried, and a root that is missing or replaced is reattached without a restart. Every `--reconcile` minutes (default 15, `0` disables) it rescans all scopes to cover missed filesystem events. `--debounce` sets the quiet period in milliseconds (default 1000).
 
-Each event is printed as one JSON line on stdout (`watching`, `scan`, `busy`, `watch-error`, `error`, `stopped`). Stop with Ctrl+C. Restart `watch` after editing the configuration. After a build, `node dist/cli.js watch` accepts the same flags.
+Each event is printed as one JSON line on stdout (`watching`, `scan`, `embedded`, `code-watching`, `code-graph`, `busy`, `watch-error`, `error`, `stopped`). `watch` also refreshes code graphs; see [Code graph](#code-graph-graphify). Stop with Ctrl+C. Restart `watch` after editing the configuration. After a build, `node dist/cli.js watch` accepts the same flags.
 
-To run it at logon on Windows, create a scheduled task that runs the built command. Replace the example paths:
+To run it at logon on Windows, register [scripts/watch-at-logon.cmd](scripts/watch-at-logon.cmd) as a scheduled task. The script starts `node dist\cli.js watch` from the repository root and appends its JSON events to `data\logs\watch.log`. `conhost --headless` keeps it from opening a window. Run from the repository root:
 
 ```powershell
-$action = New-ScheduledTaskAction -Execute 'C:/example/node24/node.exe' -Argument 'C:/example/engineering/dist/cli.js watch' -WorkingDirectory 'C:/example/engineering'
-Register-ScheduledTask -TaskName 'Engineering index watch' -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0)
+$repo = (Get-Location).Path
+$action = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\conhost.exe" -Argument "--headless `"$repo\scripts\watch-at-logon.cmd`"" -WorkingDirectory $repo
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"; $trigger.Delay = 'PT30S'
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+Register-ScheduledTask -TaskName 'Engineering index watch' -Action $action -Trigger $trigger -Settings $settings -Principal $principal
 ```
+
+The task starts 30 seconds after logon, runs with normal user rights and no time limit, and restarts up to three times if it fails. Node and Graphify must be on the user's `PATH`. The task runs the built `dist\`, so run `pnpm build` after pulling changes, then restart the task. Manage it with `Start-ScheduledTask`, `Stop-ScheduledTask` and `Unregister-ScheduledTask -TaskName 'Engineering index watch'`. Stop the task before running `watch` by hand, or both will rebuild code graphs. The log is never rotated; delete it when it grows large.
 
 ## Search indexed notes
 
@@ -168,12 +174,22 @@ pnpm dev -- code-build                 # every project with a codeGraph
 pnpm dev -- code-build --project groceryos
 ```
 
-This runs `graphify update <repository> --no-cluster` with `GRAPHIFY_OUT` pointing at `output`. Graphify extracts code with tree-sitter and needs no LLM, and LLM API keys are removed from its environment. All files go to `output`, so the repository is only read. Set `GRAPHIFY_COMMAND` if the executable is not on `PATH`. Later builds reuse Graphify's cache. Rerun after code changes; `watch` does not rebuild code graphs.
+This runs `graphify update <repository> --no-cluster` with `GRAPHIFY_OUT` pointing at `output`. Graphify extracts code with tree-sitter and needs no LLM, and LLM API keys are removed from its environment. All files go to `output`, so the repository is only read. Set `GRAPHIFY_COMMAND` if the executable is not on `PATH`. Later builds reuse Graphify's cache; on GroceryOS (3,792 nodes) a rebuild took 6–16 s.
+
+`--visualize`, or `"visualize": true` in `codeGraph`, also writes the views to `output`:
+
+- `graph.html`, the interactive network coloured by cluster;
+- `GRAPH_REPORT.md`, with clusters and hub nodes;
+- `GRAPH_TREE.html`, a collapsible folder and symbol tree.
+
+It runs `graphify cluster-only --no-label`, which keeps cluster names as "Community N" without an LLM, then `graphify tree`. The MCP tools ignore cluster data, and their results are unchanged.
+
+`watch` keeps code graphs current. For each project with a `codeGraph`, it builds once at startup and then watches the repository. A rebuild starts 10 seconds after the last source-file change (`--code-debounce MS`), and continuous edits wait at most 60 seconds. Only extensions Graphify parses count (TypeScript, JavaScript, Python, Go, Rust, Java and others), and excluded folders such as `node_modules` are ignored, so editing notes or data files does not rebuild the graph. One build runs at a time, and an edit during a build queues exactly one more. A failed build is reported and retried on the next change. Reconciliation also rebuilds. Use `--no-code` to watch notes only. The MCP tools read the new `graph.json` on their next call.
 
 The MCP server adds two read-only tools. Both need a `projectId`, or a detected project.
 
 - `search_code_graph(query, projectId?, limit?)` finds functions, methods, types and files by name. Words are split on case and punctuation, so `apply sale` finds `applySale()`. Each result has a node ID, kind, repository-relative path, line and its dependent and dependency counts.
-- `get_code_impact(nodeId, projectId?, direction?, depth?, limit?)` walks the edges Graphify's own `affected` command uses: calls, imports, references, inheritance, `defines` and others. With `direction: "dependents"` (the default) it reports what depends on the node, which is what a change can break. With `"dependencies"` it reports what the node uses. A class's or file's own members seed the walk. Each hit cites the call or import site, its depth, relation, and whether Graphify extracted or inferred it. `depth` defaults to 2 (maximum 4) and `limit` to 50.
+- `get_code_impact(nodeId, projectId?, direction?, depth?, limit?)` takes a node ID from search, an exact function or type name such as `coverOversell`, or a repository-relative file path. A name shared by several nodes returns the candidate IDs. It walks the edges Graphify's own `affected` command uses: calls, imports, references, inheritance, `defines` and others. With `direction: "dependents"` (the default) it reports what depends on the node, which is what a change can break. With `"dependencies"` it reports what the node uses. A class's or file's own members seed the walk. Each hit cites the call or import site, its depth, relation, and whether Graphify extracted or inferred it. `depth` defaults to 2 (maximum 4) and `limit` to 50.
 
 `code-search` and `code-impact` print the same JSON from the CLI. File-level impact can widen quickly through barrel files that re-export many modules, so start from a function or type for a focused answer.
 

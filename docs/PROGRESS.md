@@ -203,3 +203,46 @@ Files: `src/code/code-graph.ts`, `src/code/build-graph.ts`, `src/config/load-con
 **Checks** (Node 26.12.1): typecheck, lint, build and all 28 tests passed. The MCP and link tests passed against the compiled server.
 
 **Not reproduced from Graphify:** method-override expansion, communities, and semantic document extraction. Code graphs are rebuilt by `code-build`, not by `watch`.
+
+### Fixed two code-tool issues found in the first GroceryOS host run
+
+The operator's run in a GroceryOS window produced a correct impact analysis of `coverOversell()`. The agent combined the code graph with grep, the source, and decisions 0013, 0020, 0023 and 0029. The run also exposed two adapter issues:
+- **Guessed node IDs failed.** The first `get_code_impact` call used a guessed node ID and failed. `get_code_impact` now also accepts an exact function, method or type name (with or without `()` or a leading `.`) or a repository-relative file path. A name shared by several nodes returns an error listing up to five candidate IDs.
+- **Some test files were labelled `symbol`.** Graphify prefixes duplicate file names with folders (for example `test/debt-payments.test.ts`), and file detection now accepts that suffix form.
+
+Typecheck, lint, build and all 28 tests passed. Against the real graph, `code-impact coverOversell` resolves by name (18 dependents), and both `debt-payments.test.ts` nodes now report kind `file`.
+
+### Added automatic code graph refresh and HTML views
+
+At the operator's request, `watch` now keeps code graphs current, and builds can produce Graphify's HTML views.
+
+**Automatic refresh (`src/code/code-watch.ts`):**
+- For each project with a `codeGraph`, `watch` builds at startup, then rebuilds after source-file changes. Only Graphify-parsed extensions count, plus folder renames; excluded paths and `graphify-out` are ignored.
+- The debounce is 10 s (`--code-debounce`) with a 60 s maximum wait.
+- Builds run one at a time across projects, and an edit during a build queues exactly one more.
+- Failures report `Code graph not updated: …` and retry on the next change. Reconciliation renews the watcher and rebuilds.
+- `--no-code` turns refresh off.
+
+**HTML views.** `code-build --visualize`, or `codeGraph.visualize`, adds `cluster-only --no-label` and `tree` runs, with the same `GRAPHIFY_OUT` redirection, working directory and LLM-key removal.
+
+Other files: `src/code/build-graph.ts`, `src/indexing/watch-service.ts`, `src/config/load-config.ts`, `src/cli.ts`, `tests/code-watch.test.ts`, `tests/code-graph.test.ts`, `tests/fake-graphify.ts`, README and specification. Tests use a fake Graphify that records every call.
+
+**Real runs.** Enabled `visualize` for GroceryOS.
+- `code-build --visualize` took 6.3 s and regenerated `graph.html`, `GRAPH_REPORT.md` and `GRAPH_TREE.html`.
+- `watch --reconcile 0` began watching the GroceryOS code, then built a visualized graph at startup in 15.1 s with no stderr output.
+- GroceryOS `git status` reported no changes, and no `graphify-out` directory was created.
+- A rebuild triggered by a change was not exercised on the real repository, because that requires editing GroceryOS; fixture tests cover it.
+
+**Checks** (Node 26.12.1): typecheck, lint, build and all 31 tests passed. The three code-watch tests passed in three consecutive runs.
+
+### Registered the logon task for watch
+
+At the operator's request, registered the Windows scheduled task `Engineering index watch` for the current user.
+- **Launcher:** `scripts/watch-at-logon.cmd` (new, no personal paths) runs `node dist\cli.js watch` from the repository root and appends output to the ignored `data\logs\watch.log`.
+- **Window:** none; the action runs it through `conhost.exe --headless`.
+- **Trigger:** logon, after a 30 s delay.
+- **Settings:** Limited run level with an interactive logon; no time limit; ignore new instances; allowed on battery; up to three restarts one minute apart.
+
+Started the task to verify it. One `watch` process ran. The log recorded `watching` for both scopes, `code-watching` for GroceryOS, a complete startup scan of both scopes, and a visualized startup code graph (3,792 nodes, 25.3 s). GroceryOS `git status` reported no changes. The task remained running.
+
+The README now documents the task commands, rebuilding `dist\` after updates, not running a second manual `watch`, and that the log is not rotated.

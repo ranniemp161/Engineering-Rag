@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { buildCodeGraph } from "../src/code/build-graph.ts";
 import { getCodeImpact, searchCodeGraph } from "../src/code/code-graph.ts";
 import { loadConfig } from "../src/config/load-config.ts";
+import { fakeGraphify } from "./fake-graphify.ts";
 
 // Mirrors graph.json from graphifyy 0.9.97 `update --no-cluster` on a three-file
 // TypeScript fixture (checkout.ts -> stock.ts -> math.ts), recorded 2026-11-24.
@@ -174,54 +175,75 @@ test("code impact follows Graphify's affected relations in both directions", asy
   ]);
   assert.equal((await impact("src_math_clamp", { limit: 1 })).results.length, 1);
   await assert.rejects(impact("nope"), /Unknown code node/);
+
+  // Exact names and file paths resolve, so an agent need not guess node IDs.
+  assert.equal((await impact("applySale")).node.nodeId, "src_stock_applysale");
+  assert.equal((await impact("sell()")).node.nodeId, "src_stock_inventory_sell");
+  assert.equal((await impact("src/stock.ts")).node.nodeId, "src_stock");
+  const graph = fixtureGraph(repository);
+  graph.nodes.push(
+    { id: "src_other_clamp", label: "clamp()", file_type: "code", source_file: "src/other.ts", source_location: "L2" },
+    // Graphify prefixes a duplicate file name with its folder.
+    { id: "src_test_stock_test", label: "test/stock.test.ts", file_type: "code", source_file: "src/test/stock.test.ts", source_location: "L1" },
+  );
+  await writeFile(path.join(output, "graph.json"), JSON.stringify(graph));
+  await assert.rejects(
+    impact("clamp"),
+    /"clamp" matches 2 code nodes; pass one nodeId: src_math_clamp \(src\/math\.ts:1\), src_other_clamp \(src\/other\.ts:2\)/,
+  );
+  const prefixed = await searchCodeGraph(config, { query: "stock.test", projectId: "pilot" });
+  assert.equal(prefixed.results[0]?.kind, "file");
   await writeFile(path.join(output, "graph.json"), "{not json");
   await assert.rejects(impact("src_math_clamp"), /unreadable/);
 });
 
 test("code-build runs graphify update with outputs outside the repository and no LLM keys", async (t) => {
   const { dir, repository, output, config, configFile, raw } = await fixture(t);
-  const fake = path.join(dir, "fake-graphify.mjs");
-  await writeFile(
-    fake,
-    `import { writeFileSync } from "node:fs";
-import path from "node:path";
-const out = process.env.GRAPHIFY_OUT;
-if (process.env.FAKE_GRAPHIFY_FAIL) { console.error("boom"); process.exit(3); }
-writeFileSync(path.join(out, "graph.json"), JSON.stringify({
-  nodes: [{ id: "a" }, { id: "b" }], links: [{ source: "a", target: "b" }],
-  argv: process.argv.slice(2), cwd: process.cwd(),
-  keys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"].filter((k) => process.env[k]),
-}));`,
-  );
+  const fake = await fakeGraphify(dir);
+  const runner = { command: process.execPath, prefixArgs: [fake] };
+  const calls = async () =>
+    (await readFile(path.join(output, "calls.log"), "utf8").catch(() => ""))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
   process.env.ANTHROPIC_API_KEY = "test-key-not-real";
   t.after(() => {
     delete process.env.ANTHROPIC_API_KEY;
   });
   const before = await readdir(repository, { recursive: true });
-  const summary = await buildCodeGraph(config, "pilot", {
-    command: process.execPath,
-    prefixArgs: [fake],
-  });
+  const summary = await buildCodeGraph(config, "pilot", { runner });
   assert.equal(summary.nodes, 2);
   assert.equal(summary.links, 1);
-  const recorded = JSON.parse(
-    await (await import("node:fs/promises")).readFile(path.join(output, "graph.json"), "utf8"),
+  assert.equal(summary.visualized, false);
+  const [update] = await calls();
+  assert.deepEqual(update.argv, ["update", repository, "--no-cluster"]);
+  assert.equal(update.cwd, output);
+  assert.deepEqual(update.keys, []);
+  assert.deepEqual(await readdir(repository, { recursive: true }), before);
+
+  // Visualizing clusters without LLM labels, then writes the tree view.
+  await rm(path.join(output, "calls.log"));
+  assert.equal((await buildCodeGraph(config, "pilot", { runner, visualize: true })).visualized, true);
+  const graphFile = path.join(output, "graph.json");
+  assert.deepEqual(
+    (await calls()).map((c) => c.argv),
+    [
+      ["update", repository, "--no-cluster"],
+      ["cluster-only", repository, "--graph", graphFile, "--no-label"],
+      ["tree", "--graph", graphFile, "--output", path.join(output, "GRAPH_TREE.html"), "--label", "Pilot"],
+    ],
   );
-  assert.deepEqual(recorded.argv, ["update", repository, "--no-cluster"]);
-  assert.equal(recorded.cwd, output);
-  assert.deepEqual(recorded.keys, []);
+  assert.ok((await calls()).every((c) => c.keys.length === 0 && c.cwd === output));
   assert.deepEqual(await readdir(repository, { recursive: true }), before);
 
   process.env.FAKE_GRAPHIFY_FAIL = "1";
   t.after(() => {
     delete process.env.FAKE_GRAPHIFY_FAIL;
   });
+  await assert.rejects(buildCodeGraph(config, "pilot", { runner }), /update failed \(exit 3\).*boom/s);
   await assert.rejects(
-    buildCodeGraph(config, "pilot", { command: process.execPath, prefixArgs: [fake] }),
-    /exit 3.*boom/s,
-  );
-  await assert.rejects(
-    buildCodeGraph(config, "pilot", { command: path.join(dir, "no-such-graphify") }),
+    buildCodeGraph(config, "pilot", { runner: { command: path.join(dir, "no-such-graphify") } }),
     /Graphify was not found/,
   );
 

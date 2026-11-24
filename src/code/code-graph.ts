@@ -78,7 +78,9 @@ function relativePath(file: string | undefined, repository: string) {
 }
 
 function kindOf(label: string, file: string | null): CodeNode["kind"] {
-  if (file && label === path.posix.basename(file)) return "file";
+  // Graphify prefixes duplicate file names with folders, as in "test/x.test.ts".
+  if (file && (label === file || file.endsWith(`/${label}`) || label === path.posix.basename(file)))
+    return "file";
   if (label.endsWith("()")) return label.startsWith(".") ? "method" : "function";
   return "symbol";
 }
@@ -91,7 +93,7 @@ export function codeGraphFor(config: Config, projectId: string | undefined) {
   if (!scope.codeGraph)
     throw new RetrievalError("No code graph is configured for this project.");
   // loadConfig resolves the repository default, so both paths are set here.
-  return scope.codeGraph as { repository: string; output: string };
+  return scope.codeGraph as { repository: string; output: string; visualize?: boolean };
 }
 
 async function loadGraph(config: Config, projectId: string | undefined) {
@@ -191,6 +193,36 @@ export async function searchCodeGraph(config: Config, input: unknown) {
   };
 }
 
+const plainName = (text: string) =>
+  text.trim().toLowerCase().replace(/\(\)$/, "").replace(/^\./, "");
+
+/**
+ * Accepts a node ID or an exact name: a function, method or type name with or
+ * without "()", or a repository-relative file path. A name shared by several
+ * nodes is reported with its candidates rather than guessed.
+ */
+function resolveNode(graph: LoadedGraph, reference: string): CodeNode {
+  const direct = graph.nodes.get(reference);
+  if (direct) return direct;
+  const wanted = plainName(reference);
+  const matches = [...graph.nodes.values()].filter(
+    (node) => plainName(node.label) === wanted || node.path?.toLowerCase() === wanted,
+  );
+  // A file path names the file node, not every symbol declared in it.
+  const files = matches.filter((node) => node.kind === "file" && node.path?.toLowerCase() === wanted);
+  const candidates = files.length === 1 ? files : matches;
+  if (candidates.length === 1) return candidates[0] as CodeNode;
+  if (!candidates.length)
+    throw new RetrievalError("Unknown code node. Use search_code_graph first.");
+  const listed = candidates
+    .slice(0, 5)
+    .map((node) => `${node.nodeId} (${node.path ?? "?"}:${node.line ?? "?"})`)
+    .join(", ");
+  throw new RetrievalError(
+    `"${reference}" matches ${candidates.length} code nodes; pass one nodeId: ${listed}`,
+  );
+}
+
 export const codeImpactInput = z.strictObject({
   nodeId: z.string().min(1).max(512),
   projectId: z.string().min(1).optional(),
@@ -207,7 +239,7 @@ export const codeImpactInput = z.strictObject({
  * but are not reported. Each hit cites the edge's call or import site.
  */
 export async function getCodeImpact(config: Config, input: unknown) {
-  const {
+  let {
     nodeId,
     projectId,
     direction = "dependents",
@@ -215,8 +247,8 @@ export async function getCodeImpact(config: Config, input: unknown) {
     limit = 50,
   } = codeImpactInput.parse(input);
   const { graph, repository } = await loadGraph(config, projectId);
-  const root = graph.nodes.get(nodeId);
-  if (!root) throw new RetrievalError("Unknown code node. Use search_code_graph first.");
+  const root = resolveNode(graph, nodeId);
+  nodeId = root.nodeId;
   const relations = new Set<string>(IMPACT_RELATIONS);
   const seen = new Set([nodeId]);
   const queue: [string, number][] = [[nodeId, 0]];

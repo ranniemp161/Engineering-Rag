@@ -583,7 +583,11 @@ The adapter:
 
   Each hit cites the edge's call or import site and its confidence. Paths are repository-relative, and an absolute path outside the repository is returned as `null`. Code tools need a project, explicit or detected.
 - Matching CLI commands: `code-search` and `code-impact`.
-- Not reproduced from Graphify: method-override expansion in `affected`, communities and LLM labels, and semantic document extraction. Graphs are not rebuilt by `watch`.
+- Not reproduced from Graphify: method-override expansion in `affected`, LLM community labels, and semantic document extraction.
+- Follow-up requested by the operator on 2026-11-24:
+  - `code-build --visualize`, or `codeGraph.visualize`, also runs `cluster-only --no-label` and `tree` with the same output redirection and key removal, producing `graph.html`, `GRAPH_REPORT.md` and `GRAPH_TREE.html`.
+  - `watch` rebuilds each code graph at startup, after source-file changes (Graphify-parsed extensions, excluded paths ignored, 10 s debounce, 60 s maximum wait), and on reconciliation.
+  - One build runs at a time, and a change during a build queues one more. Failures are reported and retried on the next change. `--no-code` disables code refresh.
 - **Exit:** Fixture tests based on recorded Graphify output cover ranking, identifier splitting, path privacy, impact in both directions with member seeding and depth, malformed and missing graphs, scope errors, and configuration rejection of outputs inside source roots or the repository. The build step is tested with a substitute executable that records its arguments, working directory and environment, plus the failure paths.
 
   A build for an approved real repository leaves its `git status` unchanged, and the MCP tools are exercised through the compiled server.

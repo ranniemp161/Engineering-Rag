@@ -18,55 +18,96 @@ const LLM_KEYS = [
   "OLLAMA_HOST",
 ];
 
+export interface GraphifyRunner {
+  command: string;
+  prefixArgs?: string[];
+}
+
+// Tests substitute a fake Graphify; operators can point GRAPHIFY_COMMAND at an executable.
+const defaultRunner = (): GraphifyRunner => ({
+  command: process.env.GRAPHIFY_COMMAND ?? "graphify",
+});
+
+function runGraphify(runner: GraphifyRunner, args: string[], output: string) {
+  const env: NodeJS.ProcessEnv = { ...process.env, GRAPHIFY_OUT: output };
+  for (const key of LLM_KEYS) delete env[key];
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn(runner.command, [...(runner.prefixArgs ?? []), ...args], {
+      cwd: output,
+      env,
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error: NodeJS.ErrnoException) =>
+      reject(
+        error.code === "ENOENT"
+          ? new Error("Graphify was not found. Install it or set GRAPHIFY_COMMAND.")
+          : error,
+      ),
+    );
+    child.on("close", (code) =>
+      code === 0
+        ? resolve()
+        : reject(
+            new Error(`graphify ${args[0]} failed (exit ${code}): ${stderr.trim().slice(-500)}`),
+          ),
+    );
+  });
+}
+
 /**
  * Builds or refreshes a project's code graph with `graphify update`, which
  * extracts code structurally (tree-sitter) without an LLM. GRAPHIFY_OUT sends
  * every output file to the configured directory, so the repository itself is
- * only read. Clustering is skipped; the engine does not use communities.
+ * only read; LLM API keys are removed from Graphify's environment.
+ *
+ * With `visualize`, it then clusters the graph without LLM labels
+ * (`cluster-only --no-label`, which writes graph.html and GRAPH_REPORT.md and
+ * adds community IDs to graph.json) and writes GRAPH_TREE.html with `tree`.
  */
 export async function buildCodeGraph(
   config: Config,
   projectId: string,
-  // Tests substitute a fake Graphify; operators can point GRAPHIFY_COMMAND at an executable.
-  runner: { command: string; prefixArgs?: string[] } = {
-    command: process.env.GRAPHIFY_COMMAND ?? "graphify",
-  },
+  options: { visualize?: boolean; runner?: GraphifyRunner } = {},
 ) {
   const { repository, output } = codeGraphFor(config, projectId);
+  const runner = options.runner ?? defaultRunner();
+  const visualize =
+    options.visualize ??
+    config.scopes.find((s) => s.id === projectId)?.codeGraph?.visualize ??
+    false;
   await mkdir(output, { recursive: true });
-  const env: NodeJS.ProcessEnv = { ...process.env, GRAPHIFY_OUT: output };
-  for (const key of LLM_KEYS) delete env[key];
   const started = performance.now();
-  const { code, stderr } = await new Promise<{ code: number | null; stderr: string }>(
-    (resolve, reject) => {
-      const args = [...(runner.prefixArgs ?? []), "update", repository, "--no-cluster"];
-      const child = spawn(runner.command, args, {
-        cwd: output,
-        env,
-        stdio: ["ignore", "ignore", "pipe"],
-        windowsHide: true,
-      });
-      let stderr = "";
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk;
-      });
-      child.on("error", (error: NodeJS.ErrnoException) =>
-        reject(
-          error.code === "ENOENT"
-            ? new Error("Graphify was not found. Install it or set GRAPHIFY_COMMAND.")
-            : error,
-        ),
-      );
-      child.on("close", (code) => resolve({ code, stderr }));
-    },
-  );
-  if (code !== 0)
-    throw new Error(`graphify update failed (exit ${code}): ${stderr.trim().slice(-500)}`);
-  const graph = JSON.parse(await readFile(path.join(output, "graph.json"), "utf8"));
+  const graphFile = path.join(output, "graph.json");
+  await runGraphify(runner, ["update", repository, "--no-cluster"], output);
+  if (visualize) {
+    await runGraphify(runner, ["cluster-only", repository, "--graph", graphFile, "--no-label"], output);
+    const label = config.scopes.find((s) => s.id === projectId)?.displayName ?? projectId;
+    await runGraphify(
+      runner,
+      ["tree", "--graph", graphFile, "--output", path.join(output, "GRAPH_TREE.html"), "--label", label],
+      output,
+    );
+  }
+  const graph = JSON.parse(await readFile(graphFile, "utf8"));
   return {
     projectId,
     nodes: Array.isArray(graph.nodes) ? graph.nodes.length : 0,
     links: Array.isArray(graph.links) ? graph.links.length : 0,
+    visualized: visualize,
     seconds: Math.round((performance.now() - started) / 100) / 10,
   };
 }
+
+// Source extensions Graphify parses; changes to other files never trigger a rebuild.
+export const CODE_EXTENSIONS = new Set(
+  (
+    "ts tsx mts cts js jsx mjs cjs py pyi go rs java kt kts scala swift rb php cs " +
+    "c h cc cpp cxx hpp hh m mm dart vue svelte astro lua ex exs erl hs ml clj " +
+    "sql sh ps1 r jl zig sol"
+  ).split(" "),
+);

@@ -62,13 +62,20 @@ try {
     );
   const config = await loadConfig(undefined, { allowUnavailableRoots: true });
   if (command === "code-build") {
-    const { values } = parseArgs({ args: rest, options: { project: { type: "string" } } });
+    const { values } = parseArgs({
+      args: rest,
+      options: { project: { type: "string" }, visualize: { type: "boolean" } },
+    });
     const projects = values.project
       ? [values.project]
       : config.scopes.filter((s) => s.codeGraph).map((s) => s.id);
     if (!projects.length) throw new Error("No project configures a codeGraph");
     const results = [];
-    for (const id of projects) results.push(await buildCodeGraph(config, id));
+    // --visualize forces the HTML views; otherwise each project's config decides.
+    for (const id of projects)
+      results.push(
+        await buildCodeGraph(config, id, values.visualize ? { visualize: true } : {}),
+      );
     console.log(JSON.stringify(results, null, 2));
   } else if (command === "code-search") {
     const { positionals, values } = parseArgs({
@@ -159,8 +166,13 @@ try {
       options: {
         debounce: { type: "string", default: "1000" },
         reconcile: { type: "string", default: "15" },
+        "code-debounce": { type: "string", default: "10000" },
+        "no-code": { type: "boolean" },
       },
     });
+    const codeDebounceMs = Number(values["code-debounce"]);
+    if (!Number.isInteger(codeDebounceMs) || codeDebounceMs < 500 || codeDebounceMs > 600_000)
+      throw new Error("--code-debounce must be 500 to 600000 milliseconds");
     const debounceMs = Number(values.debounce);
     const reconcileMinutes = Number(values.reconcile);
     if (!Number.isInteger(debounceMs) || debounceMs < 50 || debounceMs > 60_000)
@@ -179,6 +191,8 @@ try {
       signal: stop.signal,
       debounceMs,
       reconcileMs: reconcileMinutes * 60_000,
+      code: !values["no-code"],
+      codeDebounceMs,
       report: (event) =>
         console.log(JSON.stringify({ at: new Date().toISOString(), ...event })),
     });
