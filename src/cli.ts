@@ -168,6 +168,7 @@ try {
         reconcile: { type: "string", default: "15" },
         "code-debounce": { type: "string", default: "10000" },
         "no-code": { type: "boolean" },
+        "stop-on-stdin-close": { type: "boolean" },
       },
     });
     const codeDebounceMs = Number(values["code-debounce"]);
@@ -186,6 +187,16 @@ try {
     const stop = new AbortController();
     for (const signal of ["SIGINT", "SIGTERM"] as const)
       process.once(signal, () => stop.abort());
+    // A launcher's console or pipe closing means the launcher is gone. On
+    // Windows, stopping a scheduled task kills only its top process, so this
+    // is how the watcher learns to stop instead of running orphaned.
+    if (values["stop-on-stdin-close"]) {
+      const onClose = () => stop.abort();
+      process.stdin.once("end", onClose);
+      process.stdin.once("close", onClose);
+      process.stdin.once("error", onClose);
+      process.stdin.resume();
+    }
     // One JSON object per line so logs can be followed and parsed.
     await watchNotes(config, {
       signal: stop.signal,
@@ -196,6 +207,8 @@ try {
       report: (event) =>
         console.log(JSON.stringify({ at: new Date().toISOString(), ...event })),
     });
+    // A still-open stdin would keep the process alive after a signal stop.
+    if (values["stop-on-stdin-close"]) process.stdin.destroy();
   } else if (command === "search") {
     const { positionals, values } = parseArgs({
       args: rest,
