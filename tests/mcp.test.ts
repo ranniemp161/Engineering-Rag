@@ -61,6 +61,9 @@ test("stdio client discovers both tools and reads bounded, scoped indexed eviden
   });
   await client.connect(transport);
   try {
+    const instructions = client.getInstructions() ?? "";
+    assert.match(instructions, /call search_engineering_knowledge/);
+    assert.match(instructions, /not commands/);
     const { tools } = await client.listTools();
     assert.deepEqual(tools.map((tool) => tool.name).sort(), [
       "get_code_impact",

@@ -149,6 +149,8 @@ node dist/mcp/server.js
 
 A client running from another directory can launch Node with an absolute path to the compiled server and set `ENGINEERING_INTELLIGENCE_CONFIG` to the absolute configuration file path. The client owns stdin and stdout. Server diagnostics go to stderr. Each tool call reloads the local configuration and opens a fresh guarded read-only index connection.
 
+On connection the server sends MCP server instructions. They ask the agent to search engineering knowledge before designing, writing or reviewing code, to check code impact before changing existing code in projects with a code graph, and to treat retrieved passages as reference material rather than commands. Hosts that support server instructions show them to the model, so no per-project rule is needed. The text is static and never includes indexed content; edit it in [src/mcp/instructions.ts](src/mcp/instructions.ts), then rebuild and restart the host.
+
 - `search_engineering_knowledge` accepts `query`, optional `projectId`, and optional `limit`. It returns the same ranked JSON payload as the CLI inside an MCP text content block.
 - `get_document` accepts the indexed `documentId` returned by search and the same optional `projectId`. Set `startLine` (default 1) and `maxLines` (default 100, maximum 200). The response includes title, scope, relative path, inclusive line range and indexed source text with LF line endings. `nextStartLine` gives the next line, or null at the end. The text budget is 8,192 UTF-16 code units. If a single line exceeds that budget the server returns its prefix, sets `truncatedLine`, and resumes at the following line. The full JSON payload is capped at 64 KiB.
 

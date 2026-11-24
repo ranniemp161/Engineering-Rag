@@ -14,12 +14,13 @@ import { getRelatedDocuments, relatedInput } from "../retrieval/related.ts";
 import { RetrievalError } from "../retrieval/scoped-index.ts";
 import { searchInput, searchKnowledge } from "../retrieval/search-service.ts";
 import { IndexBusyError } from "../storage/turso.ts";
+import { SERVER_INSTRUCTIONS } from "./instructions.ts";
 import { detectProject } from "./project-detection.ts";
 
-const server = new McpServer({
-  name: "engineering-intelligence",
-  version: "0.1.0",
-});
+const server = new McpServer(
+  { name: "engineering-intelligence", version: "0.1.0" },
+  { instructions: SERVER_INSTRUCTIONS },
+);
 
 /** Workspace folders from MCP roots when the host shares them, else the launch directory. */
 async function workingDirectories(): Promise<string[]> {
