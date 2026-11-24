@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { readIndex, writeIndex } from "./index-access.ts";
 import { startViewer } from "./start-viewer.ts";
 
 test("viewer shows index and validation errors, creates no index files, and hides unexpected faults", async (t) => {
@@ -35,12 +36,29 @@ test("viewer shows index and validation errors, creates no index files, and hide
   assert.equal(invalid.status, 400);
   assert.match((await invalid.json()).error, /^Invalid request: query: /);
 
+  // A busy index is retryable, so it is reported as unavailable, not as a bad request.
+  const databasePath = path.join(dir, "data", "index.db");
+  await writeIndex(databasePath, async () => {});
+  await readIndex(databasePath, async () => {
+    const busy = await overview();
+    assert.equal(busy.status, 503);
+    assert.match(busy.body.error, /^INDEX_BUSY/);
+  });
+
   // A file that is not an index fails with a generic message; details go to stderr.
+  await rm(path.join(dir, "data"), { recursive: true });
   await mkdir(path.join(dir, "data"));
-  await writeFile(path.join(dir, "data", "index.db"), "not a database");
+  await writeFile(databasePath, "not a database");
   const broken = await overview();
   assert.equal(broken.status, 500);
   assert.equal(broken.body.error, "Request failed. Check the viewer diagnostics.");
   assert.ok(!JSON.stringify(broken.body).includes(dir));
   await viewer.waitFor(/Viewer request failed/);
+});
+
+test("starting a viewer that exits fails at once instead of waiting out the timeout", async (t) => {
+  const started = performance.now();
+  // The last --port wins, and an out-of-range port makes the viewer exit at startup.
+  await assert.rejects(startViewer(t, "unused.json", ["--port", "70000"]), /Viewer exited/);
+  assert.ok(performance.now() - started < 5000);
 });

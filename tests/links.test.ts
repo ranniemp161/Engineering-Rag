@@ -14,6 +14,7 @@ import { loadConfig } from "../src/config/load-config.ts";
 import { extractReferences } from "../src/markdown/references.ts";
 import { detectProject } from "../src/mcp/project-detection.ts";
 import { getRelatedDocuments } from "../src/retrieval/related.ts";
+import { IndexUpgradeNeededError } from "../src/storage/index-session.ts";
 import { readIndex, writeIndex } from "./index-access.ts";
 
 test("reference extraction covers links, wikilinks and numbers but not code or dates", () => {
@@ -163,7 +164,10 @@ test("an older index gains references on its next write without rescanning notes
   });
   await assert.rejects(
     related("pilot", "decisions/0001-first.md", "pilot"),
-    /Run the index command/,
+    (error) =>
+      error instanceof IndexUpgradeNeededError &&
+      error.message ===
+        "Links are unavailable until the index is upgraded. Run the index command.",
   );
   index();
   assert.deepEqual((await related("pilot", "decisions/0001-first.md", "pilot")).out, [

@@ -14,7 +14,11 @@ import { indexStatus } from "../indexing/index-service.ts";
 import { getDocument } from "../retrieval/get-document.ts";
 import { getRelatedDocuments } from "../retrieval/related.ts";
 import { searchKnowledge } from "../retrieval/search-service.ts";
-import { IndexError, withReadSession } from "../storage/index-session.ts";
+import {
+  IndexBusyError,
+  IndexError,
+  withReadSession,
+} from "../storage/index-session.ts";
 import { z } from "zod";
 import { PAGE } from "./page.ts";
 
@@ -124,7 +128,7 @@ const server = createServer(async (req, res) => {
 
 /**
  * Maps a request failure to what the browser may see. Invalid input and index
- * errors are the caller's to act on; anything else may carry paths or SQL, so
+ * errors are the caller's to act on (a busy index is a retryable 503); anything else may carry paths or SQL, so
  * it gets a generic message and its details go to stderr.
  */
 function publicError(error: unknown) {
@@ -135,6 +139,8 @@ function publicError(error: unknown) {
         .map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`)
         .join("; ")}`,
     };
+  // A busy index clears once the other operation finishes, so it is retryable.
+  if (error instanceof IndexBusyError) return { status: 503, message: error.message };
   if (error instanceof IndexError) return { status: 400, message: error.message };
   return { status: 500, message: "Request failed. Check the viewer diagnostics." };
 }

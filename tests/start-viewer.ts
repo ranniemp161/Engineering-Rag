@@ -14,8 +14,11 @@ export async function startViewer(t: TestContext, config: string, args: string[]
       stdio: ["ignore", "ignore", "pipe"],
     },
   );
-  t.after(() => {
+  // Wait for the viewer to exit so it never outlives its test.
+  const exit = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  t.after(async () => {
     child.kill();
+    await exit;
   });
   let stderr = "";
   const listeners = new Set<() => void>();
@@ -45,6 +48,8 @@ export async function startViewer(t: TestContext, config: string, args: string[]
       listeners.add(check);
       child.once("exit", exited);
       check();
+      // The viewer may already have exited before this wait began.
+      if (child.exitCode !== null || child.signalCode !== null) exited(child.exitCode);
     });
   const [, url] = await waitFor(/Engineering index viewer: (http:\/\/127\.0\.0\.1:\d+)/);
   return { url, waitFor, stderr: () => stderr };

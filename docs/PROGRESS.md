@@ -361,3 +361,25 @@ The viewer had started hiding input validation errors behind its generic message
 - **Test (`tests/viewer.test.ts`):** an empty search query returns the validation message, verified failing first. A non-index file now expects 500.
 
 **Checks** (Node 26.12.1): build, typecheck and lint passed; 42/42 tests passed; the compiled MCP protocol test passed.
+
+### Second review fixes: busy status, upgrade and shared-project tests, viewer helper
+
+A second two-axis review of PR #3 found no documented-standard violations. The operator chose three fixes:
+- **Busy index in the viewer:** `IndexBusyError` now returns **503**, so HTTP clients can tell it is retryable (AGENTS.md: "a retryable busy error"). Other index errors stay 400. The viewer test holds a read session and expects 503 `INDEX_BUSY`, verified failing first.
+- **Tests for existing behavior:**
+  - `tests/links.test.ts` asserts `IndexUpgradeNeededError` and its exact message on a schema 2 index.
+  - `tests/search.test.ts` checks that `projectId: "shared"` returns shared results only, and that an unknown project through search raises `UnknownScopeError` "Unknown project ID".
+- **Viewer test helper (`tests/start-viewer.ts`):**
+  - Cleanup now waits for the viewer process to exit.
+  - Waiting fails at once if the viewer has already exited.
+  - A new test confirms a viewer that exits at startup fails fast. It exercises the exit-while-waiting path; the already-exited check is a safeguard the test cannot trigger reliably.
+
+**Checks** (Node 26.12.1): build, typecheck and lint passed; 43/43 tests passed; the compiled MCP protocol test passed.
+
+Not chosen, left as review notes:
+- the `IndexError` and `knownScopes` names,
+- duplicated scope-ID lists and refresh sequence (candidate 2),
+- `config` passed twice,
+- the `hasEmbeddings` alias,
+- the multi-step viewer test,
+- the schema-downgrade fixture.
