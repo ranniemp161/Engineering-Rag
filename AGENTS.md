@@ -43,3 +43,17 @@ Use temporary fixtures for development and tests. Place test suites under `tests
 - On Windows, all index operations share a persistent sibling guard file for the canonical database path. Acquire its exclusive OS lock before opening Turso, close the connection before releasing it, and return a retryable busy error after a bounded wait. Keep the guard file across rebuilds.
 - For keyword retrieval, use Turso's native full-text index with `index_method`. Follow the verified query in section 14. Reuse the same bound search term for matching and scoring, preserve scores through metadata joins, and filter eligible scopes before applying the limit.
 - Preserve the `search_engineering_knowledge` and `get_document` contracts. Default searches to shared knowledge. A project query can also see that project's notes. Validate the indexed document ID and scope before returning bounded text with a relative path and line citation. Reserve MCP stdout for protocol messages and send diagnostics to stderr.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues for ranniemp161/Engineering-Rag via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one root `GLOSSARY.md` and `docs/adr/`, created when first needed. See `docs/agents/domain.md`.

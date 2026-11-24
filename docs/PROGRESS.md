@@ -287,3 +287,13 @@ Unresolved: whether each host (Claude Code, Codex, Gemini, Copilot) shows the in
 - **Stop, then start 1 s later:** the old watcher logged `stopped` after its build. The waiting launcher started 1 s later. One watcher resulted, with a clean startup scan.
 
 Unresolved: a stop waits for an in-flight code graph build (about 40 s on GroceryOS) rather than cancelling it, to avoid partial graph output.
+
+### Configured the repository for the engineering agent skills
+
+At the operator's request, ran the skills setup so issue and planning skills (`to-spec`, `to-tickets`, `triage`, `implement`, `wayfinder`, `grill-with-docs`) know where to read and write.
+- **Issue tracker:** GitHub Issues for this repository via `gh` (`docs/agents/issue-tracker.md`). External PRs are not treated as requests.
+- **Triage labels:** the five defaults (`docs/agents/triage-labels.md`). Created `needs-triage`, `needs-info`, `ready-for-agent` and `ready-for-human` on GitHub; `wontfix` already existed.
+- **Domain docs:** single-context layout (`docs/agents/domain.md`). `GLOSSARY.md` and `docs/adr/` do not exist yet and are created when first needed.
+- **AGENTS.md:** added an "Agent skills" section pointing at these files.
+
+Checks: `gh label list` shows all five labels. No code changed, so no build or test run.
