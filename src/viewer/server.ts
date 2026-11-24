@@ -14,7 +14,12 @@ import { indexStatus } from "../indexing/index-service.ts";
 import { getDocument } from "../retrieval/get-document.ts";
 import { getRelatedDocuments } from "../retrieval/related.ts";
 import { searchKnowledge } from "../retrieval/search-service.ts";
-import { withIndex } from "../storage/turso.ts";
+import {
+  IndexBusyError,
+  IndexError,
+  withReadSession,
+} from "../storage/index-session.ts";
+import { z } from "zod";
 import { PAGE } from "./page.ts";
 
 const { values } = parseArgs({
@@ -33,8 +38,9 @@ const { values } = parseArgs({
 const evalFile = path.resolve(values.eval);
 const baselineFile = values.baseline && path.resolve(values.baseline);
 const port = Number(values.port);
-if (!Number.isInteger(port) || port < 1 || port > 65535)
-  throw new Error("--port must be an integer from 1 to 65535");
+// Port 0 lets the OS choose a free port; the ready line reports the bound one.
+if (!Number.isInteger(port) || port < 0 || port > 65535)
+  throw new Error("--port must be an integer from 0 to 65535");
 
 async function api(route: string, query: URLSearchParams) {
   const config = await loadConfig(undefined, { allowUnavailableRoots: true });
@@ -42,19 +48,23 @@ async function api(route: string, query: URLSearchParams) {
   const number = (name: string) =>
     query.get(name) ? Number(query.get(name)) : undefined;
   if (route === "/api/overview")
-    return withIndex(config.databasePath, true, async (db) => ({
+    return withReadSession(
+      config,
+      config.scopes.map((scope) => scope.id),
+      async (session) => ({
       scopes: config.scopes.map(({ id, displayName, type }) => ({
         id,
         name: displayName,
         type,
       })),
-      status: await indexStatus(db),
-      documents: await db.all(
+      status: await indexStatus(session),
+      documents: await session.db.all(
         `SELECT d.id, d.scope_id AS scope, d.relative_path AS path, d.title,
                 (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id) AS chunks
          FROM documents d ORDER BY d.scope_id, d.relative_path`,
       ),
-    }));
+      }),
+    );
   if (route === "/api/search")
     return searchKnowledge(config, {
       query: query.get("q") ?? "",
@@ -109,17 +119,39 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(data));
   } catch (error) {
-    res.writeHead(400, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: (error as Error).message }));
+    const { status, message } = publicError(error);
+    if (status === 500) console.error("Viewer request failed:", error);
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
   }
 });
+
+/**
+ * Maps a request failure to what the browser may see. Invalid input and index
+ * errors are the caller's to act on (a busy index is a retryable 503); anything else may carry paths or SQL, so
+ * it gets a generic message and its details go to stderr.
+ */
+function publicError(error: unknown) {
+  if (error instanceof z.ZodError)
+    return {
+      status: 400,
+      message: `Invalid request: ${error.issues
+        .map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`)
+        .join("; ")}`,
+    };
+  // A busy index clears once the other operation finishes, so it is retryable.
+  if (error instanceof IndexBusyError) return { status: 503, message: error.message };
+  if (error instanceof IndexError) return { status: 400, message: error.message };
+  return { status: 500, message: "Request failed. Check the viewer diagnostics." };
+}
 
 server.on("error", (error) => {
   console.error(error.message);
   process.exitCode = 1;
 });
 server.listen(port, "127.0.0.1", () => {
-  const address = `http://127.0.0.1:${port}`;
+  const bound = server.address();
+  const address = `http://127.0.0.1:${typeof bound === "object" && bound ? bound.port : port}`;
   console.error(`Engineering index viewer: ${address} (Ctrl+C to stop)`);
   if (values["no-open"]) return;
   const opener =

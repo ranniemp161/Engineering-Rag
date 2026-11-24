@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
+import { startViewer } from "./start-viewer.ts";
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const dir = await mkdtemp(path.join(tmpdir(), "engineering-eval-"));
@@ -168,52 +167,17 @@ test("eval rejects invalid or unreachable cases before searching", async (t) => 
   );
 });
 
-async function freePort() {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  await new Promise((resolve) => server.close(resolve));
-  if (!address || typeof address === "string") throw new Error("No port");
-  return address.port;
-}
-
 test("viewer serves the evaluation report and comparison", async (t) => {
   const { dir, config, cli, cases, writeCases } = await fixture(t);
   await writeCases(standardCases);
   const baseline = path.join(dir, "baseline.json");
   cli(["eval", "--file", cases, "--output", baseline]);
-  const port = await freePort();
-  const child = spawn(
-    process.execPath,
-    [
-      "src/viewer/server.ts",
-      "--no-open",
-      "--port",
-      String(port),
-      "--eval",
-      cases,
-      "--baseline",
-      baseline,
-    ],
-    {
-      env: { ...process.env, ENGINEERING_INTELLIGENCE_CONFIG: config },
-      stdio: ["ignore", "ignore", "pipe"],
-    },
-  );
-  t.after(() => {
-    child.kill();
-  });
-  let ready = "";
-  child.stderr.on("data", (chunk) => {
-    ready += chunk;
-  });
-  for (let i = 0; i < 100 && !ready.includes("viewer"); i++) await delay(50);
-  assert.match(ready, /Engineering index viewer/);
-  const report = await (await fetch(`http://127.0.0.1:${port}/api/eval`)).json();
+  const viewer = await startViewer(t, config, ["--eval", cases, "--baseline", baseline]);
+  const report = await (await fetch(`${viewer.url}/api/eval`)).json();
   assert.equal(report.summary.hitAt1, 0.5);
   assert.deepEqual(report.comparison.regressions, []);
   assert.equal(report.comparison.delta.hitAt1, 0);
-  const page = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+  const page = await (await fetch(`${viewer.url}/`)).text();
   assert.match(page, /id="evalBtn"/);
   assert.doesNotMatch(page, /Â|â€/);
 });

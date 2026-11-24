@@ -3,8 +3,8 @@ import { getCodeImpact, searchCodeGraph } from "./code/code-graph.ts";
 import { loadConfig } from "./config/load-config.ts";
 import { indexNotes, indexStatus } from "./indexing/index-service.ts";
 import { watchNotes } from "./indexing/watch-service.ts";
-import { migrate, withIndex } from "./storage/turso.ts";
-import { stat, writeFile } from "node:fs/promises";
+import { withReadSession, withWriteSession } from "./storage/index-session.ts";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   compareReports,
@@ -232,29 +232,27 @@ try {
       { mode: parseMode(values.mode) },
     );
     console.log(JSON.stringify(output, null, 2));
-  } else if (
-    command === "status" &&
-    !(await stat(config.databasePath).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "ENOENT") throw error;
-    }))
-  )
-    console.log(JSON.stringify({ initialized: false, scopes: [] }));
-  else {
+  } else if (command === "status") {
+    const output = await withReadSession(config, [], indexStatus, {
+      whenMissing: () => ({ initialized: false, scopes: [] }),
+    });
+    console.log(JSON.stringify(output, null, 2));
+  } else {
     // Load the model before taking the index guard; failure does not block indexing.
     let embedder: Embedder | undefined;
     let embedFailure: string | undefined;
-    if (command !== "status" && config.semantic)
+    if (config.semantic)
       embedder = await getEmbedder(config.semantic).catch((error: Error) => {
         embedFailure = error.message;
         return undefined;
       });
-    const output = await withIndex(
-      config.databasePath,
-      command === "status",
-      async (db) => {
-        await migrate(db, command === "status");
-        if (command === "status") return indexStatus(db);
-        const result = await indexNotes(db, config, command === "rebuild");
+    const rebuild = command === "rebuild";
+    const output = await withWriteSession(
+      config,
+      config.scopes.map((scope) => scope.id),
+      async (session) => {
+        const { db } = session;
+        const result = await indexNotes(session, config);
         if (result.some((scope) => scope.errors.length)) process.exitCode = 1;
         if (embedder)
           await embedPending(db, embedder).catch((error: Error) => {
@@ -262,6 +260,7 @@ try {
           });
         return result;
       },
+      { rebuild },
     );
     console.log(JSON.stringify(output, null, 2));
     if (embedFailure) {

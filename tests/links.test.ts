@@ -14,7 +14,8 @@ import { loadConfig } from "../src/config/load-config.ts";
 import { extractReferences } from "../src/markdown/references.ts";
 import { detectProject } from "../src/mcp/project-detection.ts";
 import { getRelatedDocuments } from "../src/retrieval/related.ts";
-import { withIndex } from "../src/storage/turso.ts";
+import { IndexUpgradeNeededError } from "../src/storage/index-session.ts";
+import { readIndex, writeIndex } from "./index-access.ts";
 
 test("reference extraction covers links, wikilinks and numbers but not code or dates", () => {
   const source = [
@@ -85,7 +86,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   index();
   const config = await loadConfig(configFile);
   const idOf = (scope: string, relativePath: string) =>
-    withIndex(config.databasePath, true, (db) =>
+    readIndex(config.databasePath, ({ db }) =>
       db.get("SELECT id FROM documents WHERE scope_id=? AND relative_path=?", scope, relativePath),
     ).then((row) => row?.id as string);
   const related = async (scope: string, relativePath: string, projectId?: string) => {
@@ -157,13 +158,16 @@ test("related documents resolve within visible scopes in both directions", async
 
 test("an older index gains references on its next write without rescanning notes", async (t) => {
   const { config, index, related } = await fixture(t);
-  await withIndex(config.databasePath, false, async (db) => {
+  await writeIndex(config.databasePath, async ({ db }) => {
     await db.exec("DROP TABLE document_references");
     await db.exec("UPDATE engineering_index_version SET version = 2");
   });
   await assert.rejects(
     related("pilot", "decisions/0001-first.md", "pilot"),
-    /Run the index command/,
+    (error) =>
+      error instanceof IndexUpgradeNeededError &&
+      error.message ===
+        "Links are unavailable until the index is upgraded. Run the index command.",
   );
   index();
   assert.deepEqual((await related("pilot", "decisions/0001-first.md", "pilot")).out, [

@@ -2,6 +2,8 @@
 
 Updated 2026-11-24. **The MVP (Milestones 0–4) is complete. Post-MVP Milestones 5 (automatic refresh) and 6 (retrieval evaluation) are complete and awaiting review. Milestone 7 (hybrid retrieval) is complete. Milestone 8 (explicit note links and project detection) is complete. Milestone 9 (Graphify code graph adapter) is complete and awaiting review. All future extensions in the specification except packaging and remote transport are now delivered.**
 
+Branch `index-session`, open as PR #3 and awaiting review: every index access now goes through one index session module (`src/storage/index-session.ts`), which owns the guard, schema upgrade, capabilities and scope root checks. Read-only opens of a missing index create nothing, and the viewer no longer returns raw error messages. 43/43 tests pass on Node 26.12.1. Open: the locking and native FTS checks have not been rerun on Node 24 LTS, which is not installed on this machine. Next action: the operator installs Node 24 and reruns the checks, reviews and merges the PR, then runs `pnpm build` and restarts the watch task. [Progress](PROGRESS.md) · [Glossary](../GLOSSARY.md)
+
 The MCP server now sends instructions on connect asking agents to search engineering knowledge before coding. Next action: restart the coding hosts and check whether agents search unprompted. [Server instructions](../README.md#local-mcp-server)
 
 The `shared` scope now points at an operator Obsidian vault outside the repository, with templates excluded from indexing. It is empty until the operator writes notes. Stopping the logon task now stops the watcher too, after any in-progress scan or code graph build, and an immediate restart waits for it. [Progress](PROGRESS.md)

@@ -1,18 +1,138 @@
 import { connect, type Database } from "@tursodatabase/database";
 import { extractReferences } from "../markdown/references.ts";
 import fsx from "fs-native-extensions";
-import { lstat, mkdir, open } from "node:fs/promises";
+import { access, lstat, mkdir, open } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import type { Config } from "../config/load-config.ts";
 
-export class IndexBusyError extends Error {}
+/** Errors whose messages are safe to show a host or browser: no paths, no SQL. */
+export class IndexError extends Error {}
+export class IndexMissingError extends IndexError {}
+export class IndexBusyError extends IndexError {}
+export class IndexRootChangedError extends IndexError {}
+export class UnknownScopeError extends IndexError {}
+export class IndexUpgradeNeededError extends IndexError {
+  constructor(capability: keyof IndexCapabilities) {
+    super(UPGRADE_MESSAGES[capability]);
+  }
+}
 
-export async function withIndex<T>(
+const UPGRADE_MESSAGES: Record<keyof IndexCapabilities, string> = {
+  embeddings:
+    "Embeddings are unavailable until the index is upgraded. Run the index command.",
+  references:
+    "Links are unavailable until the index is upgraded. Run the index command.",
+};
+
+export type SessionConfig = {
+  databasePath: Config["databasePath"];
+  scopes: readonly Pick<Config["scopes"][number], "id" | "rootPath">[];
+};
+
+/** Schema features of the opened index. Read sessions may see older schemas. */
+export type IndexCapabilities = { embeddings: boolean; references: boolean };
+
+export type IndexSession = { db: Database; capabilities: IndexCapabilities };
+
+/** A write session also records which scopes it may change, and whether it rebuilds. */
+export type WriteSession = IndexSession & {
+  scopeIds: readonly string[];
+  rebuild: boolean;
+};
+
+/**
+ * Opens the index read-only under the shared guard. A missing index creates
+ * nothing: it returns `whenMissing()` when given, and otherwise throws
+ * IndexMissingError. Throws IndexRootChangedError when an indexed root of
+ * `scopeIds` no longer matches the configuration.
+ */
+export async function withReadSession<T, M = never>(
+  config: SessionConfig,
+  scopeIds: readonly string[],
+  operation: (session: IndexSession) => Promise<T>,
+  options: { whenMissing?: () => M } = {},
+): Promise<T | M> {
+  knownScopes(config, scopeIds);
+  const present = await access(config.databasePath).then(
+    () => true,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+      return false;
+    },
+  );
+  if (!present) {
+    if (options.whenMissing) return options.whenMissing();
+    throw new IndexMissingError("Index missing. Run the index command first.");
+  }
+  return guarded(config.databasePath, true, async (db) => {
+    const capabilities = capabilitiesOf(await migrate(db, true));
+    await verifyRoots(db, config, scopeIds, () =>
+      new IndexRootChangedError("Indexed scope root has changed. Rebuild the index."),
+    );
+    return operation({ db, capabilities });
+  });
+}
+
+/**
+ * Opens the index for writing, creating or upgrading the schema. Unless
+ * rebuilding, refuses a scope in `scopeIds` whose indexed root has moved.
+ */
+export async function withWriteSession<T>(
+  config: SessionConfig,
+  scopeIds: readonly string[],
+  operation: (session: WriteSession) => Promise<T>,
+  options: { rebuild?: boolean } = {},
+): Promise<T> {
+  knownScopes(config, scopeIds);
+  await mkdir(path.dirname(config.databasePath), { recursive: true });
+  return guarded(config.databasePath, false, async (db) => {
+    const capabilities = capabilitiesOf(await migrate(db, false));
+    const rebuild = options.rebuild ?? false;
+    if (!rebuild)
+      await verifyRoots(db, config, scopeIds, (id) =>
+        new IndexRootChangedError(
+          `Scope ${id} changed roots. Use rebuild to replace its previous index.`,
+        ),
+      );
+    return operation({ db, capabilities, scopeIds, rebuild });
+  });
+}
+
+function knownScopes(config: SessionConfig, scopeIds: readonly string[]) {
+  for (const id of scopeIds)
+    if (!config.scopes.some((scope) => scope.id === id))
+      // The shared scope is required by configuration, so only a project can be unknown.
+      throw new UnknownScopeError("Unknown project ID");
+}
+
+function capabilitiesOf(version: number): IndexCapabilities {
+  return { embeddings: version >= 2, references: version >= 3 };
+}
+
+async function verifyRoots(
+  db: Database,
+  config: SessionConfig,
+  scopeIds: readonly string[],
+  changed: (id: string) => IndexError,
+) {
+  if (!scopeIds.length) return;
+  const rows = await db.all(
+    `SELECT id,root_path FROM scopes WHERE id IN (${scopeIds.map(() => "?").join(",")})`,
+    ...scopeIds,
+  );
+  for (const row of rows) {
+    const scope = config.scopes.find((s) => s.id === row.id);
+    if (!scope || path.relative(scope.rootPath, row.root_path) !== "")
+      throw changed(row.id);
+  }
+}
+
+async function guarded<T>(
   file: string,
   readonly: boolean,
   operation: (db: Database) => Promise<T>,
 ): Promise<T> {
-  await mkdir(path.dirname(file), { recursive: true });
   for (const suffix of ["", ".guard", "-wal", "-shm", "-journal"]) {
     const info = await lstat(file + suffix).catch(
       (error: NodeJS.ErrnoException) => {
@@ -59,7 +179,7 @@ const REFERENCES = `
     line INTEGER NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL);
   CREATE INDEX document_references_document ON document_references(document_id);`;
 
-export const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 3;
 
 export async function writeReferences(
   tx: Pick<Database, "run" | "prepare">,
@@ -79,7 +199,7 @@ export async function writeReferences(
  * connection accepts older versions; features they lack report that the
  * index needs a write to upgrade.
  */
-export async function migrate(db: Database, readonly: boolean): Promise<number> {
+async function migrate(db: Database, readonly: boolean): Promise<number> {
   const tables = await db.all(
     "SELECT name FROM sqlite_schema WHERE type='table'",
   );

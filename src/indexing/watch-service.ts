@@ -1,7 +1,7 @@
 import { type FSWatcher, watch } from "node:fs";
 import path from "node:path";
 import type { Config } from "../config/load-config.ts";
-import { IndexBusyError, migrate, withIndex } from "../storage/turso.ts";
+import { IndexBusyError, withWriteSession } from "../storage/index-session.ts";
 import { embedPending } from "../semantic/embed-index.ts";
 import { type Embedder, getEmbedder } from "../semantic/embedder.ts";
 import {
@@ -126,9 +126,9 @@ export async function watchNotes(config: Config, options: WatchOptions) {
             return undefined;
           }));
       let embedding: Awaited<ReturnType<typeof embedPending>> | undefined;
-      const results = await withIndex(config.databasePath, false, async (db) => {
-        await migrate(db, false);
-        const scanned = await indexNotes(db, config, false, new Set(scopes));
+      const results = await withWriteSession(config, scopes, async (session) => {
+        const { db } = session;
+        const scanned = await indexNotes(session, config);
         if (embedder)
           embedding = await embedPending(db, embedder).catch((error: Error) => {
             report({ event: "error", scopes, message: `Embeddings not updated: ${error.message}` });

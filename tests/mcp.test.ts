@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { withIndex } from "../src/storage/turso.ts";
+import { readIndex } from "./index-access.ts";
 
 test("stdio client discovers both tools and reads bounded, scoped indexed evidence", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "engineering-mcp-"));
@@ -141,7 +141,7 @@ test("stdio client discovers both tools and reads bounded, scoped indexed eviden
       (await call(search, { query: "nonexistentterm" })).results,
       [],
     );
-    await withIndex(databasePath, true, async () =>
+    await readIndex(databasePath, async () =>
       assert.match(await call(get, read, true), /INDEX_BUSY/),
     );
     index();

@@ -13,6 +13,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { loadConfig } from "../src/config/load-config.ts";
 import { searchKnowledge } from "../src/retrieval/search-service.ts";
+import { UnknownScopeError } from "../src/storage/index-session.ts";
 
 test("ranked CLI search enforces project boundaries before limiting and cites literal source", async (t) => {
   const dir = await realpath(
@@ -67,6 +68,13 @@ test("ranked CLI search enforces project boundaries before limiting and cites li
   assert.deepEqual(
     ranked.results.map((r) => r.scope),
     ["a", "shared"],
+  );
+  // The shared scope named as a project reads shared knowledge only.
+  const sharedOnly = await searchKnowledge(config, { query: "audit", projectId: "shared" });
+  assert.deepEqual([...new Set(sharedOnly.results.map((r) => r.scope))], ["shared"]);
+  await assert.rejects(
+    searchKnowledge(config, { query: "audit", projectId: "missing" }),
+    (error) => error instanceof UnknownScopeError && error.message === "Unknown project ID",
   );
   const strongest = await searchKnowledge(config, {
     query: "audit",

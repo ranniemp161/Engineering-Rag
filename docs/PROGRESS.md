@@ -297,3 +297,89 @@ At the operator's request, ran the skills setup so issue and planning skills (`t
 - **AGENTS.md:** added an "Agent skills" section pointing at these files.
 
 Checks: `gh label list` shows all five labels. No code changed, so no build or test run.
+
+### Architecture review: deepening candidates
+
+At the operator's request, ran an architecture review over recent hot spots (CLI, MCP server, viewer, storage, indexing, retrieval, watch). No code changed. Candidates, highest confidence first:
+1. **Index session module** (`storage/turso.ts`, `retrieval/scoped-index.ts`, callers in `cli.ts`, `watch-service.ts`, `viewer/server.ts`): every caller sequences existence check, guard, `migrate`, schema probes and root check by hand. The viewer's `/api/overview` skips existence, `migrate` and root checks, and a read-only `withIndex` still creates the parent directory and guard file.
+2. **One refresh-index operation** shared by CLI and watch (ordering rule duplicated; five test suites spawn `cli.ts index` for fixtures).
+3. **One retrieval module behind MCP, viewer and CLI**: only MCP masks unexpected errors; the viewer returns any error message with status 400 and lists all scopes.
+4. **Single search pipeline** (hybrid fallback reopens the index session; duplicated shaping loop).
+5. **Shared debounced root watcher** for notes and code watch.
+6. **Resolved config type** (speculative).
+
+Unresolved: which candidate to take into design. The viewer error leakage and read-only file creation are real defects independent of any refactor.
+
+### Deepened index access into an index session module
+
+Took architecture candidate 1 through a design interview and implemented it on branch `index-session`, test-first.
+- **Module:** `src/storage/index-session.ts` (renamed from `turso.ts`) exposes `withReadSession` and `withWriteSession(config, scopeIds, callback)`, a write `rebuild` option, and named capabilities (`embeddings`, `references`). It owns the sidecar check, the exclusive guard (unchanged), schema upgrade and scope root verification. `withIndex` and `migrate` are no longer exported, and callers no longer query `sqlite_schema`.
+- **Read sessions** on a missing index throw `IndexMissingError` and create no directory or guard file. Read sessions still accept schema 1 and 2 without upgrading.
+- **Errors:** `IndexError` marks messages safe to show (missing, busy, root changed, unknown scope, needs upgrade); `RetrievalError` extends it. MCP and the viewer now show only `IndexError` messages; anything else is logged to stderr and replaced by a generic message.
+- **Callers:** CLI `status` (catches missing), `index`/`rebuild`, watch scans, `scoped-index.ts`, `related.ts`, `search-service.ts`, `indexStatus`, and the viewer overview (now checks every scope root). The write-side root check moved from `scanScope` into the write session, so an index run with a moved root now fails before committing any scope.
+- **Docs:** new `GLOSSARY.md` (scope, scope root, index session, index capability); specification tree updated.
+- **Tests:** new `tests/index-session.test.ts` (7 cases) and `tests/viewer.test.ts` (missing index creates nothing; a non-index file returns the generic message, verified failing on the previous viewer). Other suites moved to the session interface with unchanged assertions.
+
+**Checks** (Node 26.12.1; Node 24 is not installed on this machine): build, typecheck and lint passed; 40/40 tests passed; the MCP protocol test passed against the compiled server (`TEST_COMPILED_MCP=1`).
+
+Unresolved: the viewer now hides input validation messages (for example Zod errors) behind the generic message. Candidates 2–4 remain open.
+
+### Index session review fixes
+
+A two-axis review of PR #3 (standards and agreed design) found gaps; fixed on the same branch.
+- **Tests added:** the busy wait is measured (about 1 s, bounded); an unknown project is refused for read and write sessions and creates nothing; a symlinked sidecar (a junction on Windows) is refused. The earlier "linked sidecar" case only covered hard links.
+- **Scope validation** now lives only in the session. `scoped-index.ts` no longer checks project type, so `projectId: "shared"` now reads shared knowledge instead of failing with "Unknown project ID". Unknown IDs report "Unknown project ID", because configuration always requires the shared scope.
+- **Needs upgrade:** `IndexUpgradeNeededError` takes the missing capability and owns its message.
+- **`indexNotes`** now takes the write session and scans only the scopes that session verified. A rebuild must cover every configured scope. Before, a caller could scan scopes it never passed to the session.
+- **Cleanup:** `SCHEMA_VERSION` is no longer exported; `hasTable` and `semantic` are renamed `hasEmbeddings`.
+- **Records:** STATUS said "uncommitted" after the commit; corrected.
+
+**Checks** (Node 26.12.1): build, typecheck and lint passed; 41/41 tests passed; the compiled MCP protocol test passed.
+
+Unresolved, and left for the operator:
+- Rerun the checks on Node 24 LTS.
+
+### Removed the viewer test port race
+
+The viewer tests picked a free port, closed it, then started the viewer on it, so another process could take the port in between; readiness was found by polling stderr.
+- **Viewer:** `--port 0` now lets the OS choose a free port, and the ready line reports the bound address (`src/viewer/server.ts`, README).
+- **Tests:** new helper `tests/start-viewer.ts` starts the viewer on port 0 and waits for stderr lines as events, rejecting if the viewer exits or after a timeout. `tests/viewer.test.ts` and the viewer test in `tests/eval.test.ts` use it; both `freePort()` copies are gone.
+
+**Checks** (Node 26.12.1): build, typecheck and lint passed; 41/41 tests passed; the two viewer suites passed three runs in a row.
+
+### Status without exceptions; shared test index access
+
+- **CLI `status`:** a missing index is an expected outcome, so it no longer travels as an exception. `withReadSession` takes an optional `whenMissing` fallback, returned instead of throwing `IndexMissingError`; `status` uses it to print `{initialized:false}`. Without the option, behaviour is unchanged (retrieval and the viewer still report "Index missing").
+- **Tests:** new helper `tests/index-access.ts` (`readIndex`, `writeIndex`) replaces the repeated `{ databasePath, scopes: [] }, []` setup in the index, links, MCP, semantic and watch suites. New session test: the fallback is returned for a missing index, creates nothing, and is ignored once the index exists.
+
+**Checks** (Node 26.12.1): build, typecheck and lint passed; 42/42 tests passed; the compiled MCP protocol test passed.
+
+### Viewer shows validation messages again
+
+The viewer had started hiding input validation errors behind its generic message.
+- **Change (`src/viewer/server.ts`):** a request failure now maps to what the browser may see. Zod validation errors return 400 with `Invalid request: <field>: <message>`, and index errors return 400 with their message. Anything else returns **500** with the generic message, and its details go to stderr. Before, these also returned 400.
+- **Test (`tests/viewer.test.ts`):** an empty search query returns the validation message, verified failing first. A non-index file now expects 500.
+
+**Checks** (Node 26.12.1): build, typecheck and lint passed; 42/42 tests passed; the compiled MCP protocol test passed.
+
+### Second review fixes: busy status, upgrade and shared-project tests, viewer helper
+
+A second two-axis review of PR #3 found no documented-standard violations. The operator chose three fixes:
+- **Busy index in the viewer:** `IndexBusyError` now returns **503**, so HTTP clients can tell it is retryable (AGENTS.md: "a retryable busy error"). Other index errors stay 400. The viewer test holds a read session and expects 503 `INDEX_BUSY`, verified failing first.
+- **Tests for existing behavior:**
+  - `tests/links.test.ts` asserts `IndexUpgradeNeededError` and its exact message on a schema 2 index.
+  - `tests/search.test.ts` checks that `projectId: "shared"` returns shared results only, and that an unknown project through search raises `UnknownScopeError` "Unknown project ID".
+- **Viewer test helper (`tests/start-viewer.ts`):**
+  - Cleanup now waits for the viewer process to exit.
+  - Waiting fails at once if the viewer has already exited.
+  - A new test confirms a viewer that exits at startup fails fast. It exercises the exit-while-waiting path; the already-exited check is a safeguard the test cannot trigger reliably.
+
+**Checks** (Node 26.12.1): build, typecheck and lint passed; 43/43 tests passed; the compiled MCP protocol test passed.
+
+Not chosen, left as review notes:
+- the `IndexError` and `knownScopes` names,
+- duplicated scope-ID lists and refresh sequence (candidate 2),
+- `config` passed twice,
+- the `hasEmbeddings` alias,
+- the multi-step viewer test,
+- the schema-downgrade fixture.

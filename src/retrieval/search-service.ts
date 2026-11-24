@@ -205,15 +205,13 @@ async function hybridSearch(
     keyword: config.semantic?.keywordWeight ?? 1,
     semantic: config.semantic?.semanticWeight ?? 1,
   };
-  return withScopedIndex(config, request.projectId, async (db, scopeId) => {
-    const hasTable = await db.get(
-      "SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='chunk_embeddings'",
-    );
-    const semanticRows = hasTable
+  return withScopedIndex(config, request.projectId, async ({ db, capabilities }, scopeId) => {
+    const hasEmbeddings = capabilities.embeddings;
+    const semanticRows = hasEmbeddings
       ? await db.all(vectorQuery, request.model, toBlob(request.vector), scopeId, CANDIDATES)
       : [];
     if (!semanticRows.length) {
-      const indexed = hasTable
+      const indexed = hasEmbeddings
         ? await db.get(
             "SELECT 1 AS present FROM chunk_embeddings WHERE model = ? LIMIT 1",
             request.model,
@@ -277,7 +275,7 @@ function keywordSearch(
   expression: string,
   keywords: RegExp,
 ): Promise<{ results: SearchResult[] }> {
-  return withScopedIndex(config, projectId, async (db, scopeId) => {
+  return withScopedIndex(config, projectId, async ({ db }, scopeId) => {
     const results: SearchResult[] = [];
     const pageSize = limit + 1;
     let bytes = 16;
