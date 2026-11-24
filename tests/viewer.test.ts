@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { startViewer } from "./start-viewer.ts";
 
-test("viewer overview reports a missing index without creating files, and hides other errors", async (t) => {
+test("viewer shows index and validation errors, creates no index files, and hides unexpected faults", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "engineering-viewer-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const shared = path.join(dir, "shared");
@@ -30,11 +30,16 @@ test("viewer overview reports a missing index without creating files, and hides 
   });
   assert.deepEqual((await readdir(dir)).sort(), ["config.json", "shared"]);
 
+  // Invalid input is the caller's to fix, so its validation message is shown.
+  const invalid = await fetch(`${viewer.url}/api/search?q=`);
+  assert.equal(invalid.status, 400);
+  assert.match((await invalid.json()).error, /^Invalid request: query: /);
+
   // A file that is not an index fails with a generic message; details go to stderr.
   await mkdir(path.join(dir, "data"));
   await writeFile(path.join(dir, "data", "index.db"), "not a database");
   const broken = await overview();
-  assert.equal(broken.status, 400);
+  assert.equal(broken.status, 500);
   assert.equal(broken.body.error, "Request failed. Check the viewer diagnostics.");
   assert.ok(!JSON.stringify(broken.body).includes(dir));
   await viewer.waitFor(/Viewer request failed/);

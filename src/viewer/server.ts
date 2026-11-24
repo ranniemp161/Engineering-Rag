@@ -15,6 +15,7 @@ import { getDocument } from "../retrieval/get-document.ts";
 import { getRelatedDocuments } from "../retrieval/related.ts";
 import { searchKnowledge } from "../retrieval/search-service.ts";
 import { IndexError, withReadSession } from "../storage/index-session.ts";
+import { z } from "zod";
 import { PAGE } from "./page.ts";
 
 const { values } = parseArgs({
@@ -114,19 +115,29 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(data));
   } catch (error) {
-    // Only index errors are safe to show; anything else may carry paths or SQL.
-    const expected = error instanceof IndexError;
-    if (!expected) console.error("Viewer request failed:", error);
-    res.writeHead(400, { "content-type": "application/json" });
-    res.end(
-      JSON.stringify({
-        error: expected
-          ? error.message
-          : "Request failed. Check the viewer diagnostics.",
-      }),
-    );
+    const { status, message } = publicError(error);
+    if (status === 500) console.error("Viewer request failed:", error);
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
   }
 });
+
+/**
+ * Maps a request failure to what the browser may see. Invalid input and index
+ * errors are the caller's to act on; anything else may carry paths or SQL, so
+ * it gets a generic message and its details go to stderr.
+ */
+function publicError(error: unknown) {
+  if (error instanceof z.ZodError)
+    return {
+      status: 400,
+      message: `Invalid request: ${error.issues
+        .map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`)
+        .join("; ")}`,
+    };
+  if (error instanceof IndexError) return { status: 400, message: error.message };
+  return { status: 500, message: "Request failed. Check the viewer diagnostics." };
+}
 
 server.on("error", (error) => {
   console.error(error.message);
