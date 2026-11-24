@@ -418,7 +418,7 @@ engineering-intelligence/
 │   ├── retrieval/
 │   │   └── search-service.ts
 │   ├── storage/
-│   │   ├── turso.ts
+│   │   ├── index-session.ts
 │   │   └── migrations/
 │   └── mcp/
 │       └── server.ts

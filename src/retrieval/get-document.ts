@@ -50,7 +50,7 @@ export async function getDocument(config: Config, input: unknown) {
     startLine = 1,
     maxLines = 100,
   } = documentInput.parse(input);
-  return withScopedIndex(config, projectId, async (db, scopeId) => {
+  return withScopedIndex(config, projectId, async ({ db }, scopeId) => {
     const row = await db.get(
       "SELECT scope_id, relative_path, substr(title,1,256) AS title, source_text FROM documents WHERE id=? AND scope_id IN ('shared',?)",
       documentId,

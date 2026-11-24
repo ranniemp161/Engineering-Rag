@@ -2,6 +2,7 @@ import path from "node:path";
 import { z } from "zod";
 import type { Config } from "../config/load-config.ts";
 import type { ReferenceKind } from "../markdown/references.ts";
+import { IndexUpgradeNeededError } from "../storage/index-session.ts";
 import { RetrievalError, withScopedIndex } from "./scoped-index.ts";
 
 export const relatedInput = z.strictObject({
@@ -100,13 +101,9 @@ function lineText(source: string, line: number) {
  */
 export async function getRelatedDocuments(config: Config, input: unknown) {
   const { documentId, projectId, limit = 20 } = relatedInput.parse(input);
-  return withScopedIndex(config, projectId, async (db, scopeId) => {
-    if (
-      !(await db.get(
-        "SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='document_references'",
-      ))
-    )
-      throw new RetrievalError(
+  return withScopedIndex(config, projectId, async ({ db, capabilities }, scopeId) => {
+    if (!capabilities.references)
+      throw new IndexUpgradeNeededError(
         "Links are unavailable until the index is upgraded. Run the index command.",
       );
     const documents: VisibleDocument[] = (

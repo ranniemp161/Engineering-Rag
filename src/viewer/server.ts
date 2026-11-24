@@ -14,7 +14,7 @@ import { indexStatus } from "../indexing/index-service.ts";
 import { getDocument } from "../retrieval/get-document.ts";
 import { getRelatedDocuments } from "../retrieval/related.ts";
 import { searchKnowledge } from "../retrieval/search-service.ts";
-import { withIndex } from "../storage/turso.ts";
+import { IndexError, withReadSession } from "../storage/index-session.ts";
 import { PAGE } from "./page.ts";
 
 const { values } = parseArgs({
@@ -42,19 +42,23 @@ async function api(route: string, query: URLSearchParams) {
   const number = (name: string) =>
     query.get(name) ? Number(query.get(name)) : undefined;
   if (route === "/api/overview")
-    return withIndex(config.databasePath, true, async (db) => ({
+    return withReadSession(
+      config,
+      config.scopes.map((scope) => scope.id),
+      async (session) => ({
       scopes: config.scopes.map(({ id, displayName, type }) => ({
         id,
         name: displayName,
         type,
       })),
-      status: await indexStatus(db),
-      documents: await db.all(
+      status: await indexStatus(session),
+      documents: await session.db.all(
         `SELECT d.id, d.scope_id AS scope, d.relative_path AS path, d.title,
                 (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id) AS chunks
          FROM documents d ORDER BY d.scope_id, d.relative_path`,
       ),
-    }));
+      }),
+    );
   if (route === "/api/search")
     return searchKnowledge(config, {
       query: query.get("q") ?? "",
@@ -109,8 +113,17 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(data));
   } catch (error) {
+    // Only index errors are safe to show; anything else may carry paths or SQL.
+    const expected = error instanceof IndexError;
+    if (!expected) console.error("Viewer request failed:", error);
     res.writeHead(400, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: (error as Error).message }));
+    res.end(
+      JSON.stringify({
+        error: expected
+          ? error.message
+          : "Request failed. Check the viewer diagnostics.",
+      }),
+    );
   }
 });
 

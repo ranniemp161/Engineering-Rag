@@ -8,7 +8,7 @@ import {
   type ScanError,
 } from "../filesystem/markdown-reader.ts";
 import { parseMarkdown } from "../markdown/chunk-markdown.ts";
-import { writeReferences } from "../storage/turso.ts";
+import { type IndexSession, writeReferences } from "../storage/index-session.ts";
 
 async function scanScope(
   tx: Transaction,
@@ -16,14 +16,7 @@ async function scanScope(
   exclude: string[],
 ) {
   const started = new Date().toISOString();
-  const previous = await tx.get(
-    "SELECT root_path FROM scopes WHERE id=?",
-    scope.id,
-  );
-  if (previous && path.relative(previous.root_path, scope.rootPath) !== "")
-    throw new Error(
-      `Scope ${scope.id} changed roots. Use rebuild to replace its previous index.`,
-    );
+  // The write session has already refused a moved root unless rebuilding.
   await tx.run(
     "INSERT INTO scopes VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name",
     scope.id,
@@ -179,11 +172,9 @@ export async function indexNotes(
   return result;
 }
 
-export async function indexStatus(db: Database) {
+export async function indexStatus({ db, capabilities }: IndexSession) {
   const scopes = [];
-  const semantic = await db.get(
-    "SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='chunk_embeddings'",
-  );
+  const semantic = capabilities.embeddings;
   for (const { id } of await db.all("SELECT id FROM scopes ORDER BY id")) {
     const counts = await db.get(
       `SELECT COUNT(DISTINCT d.id) AS documents,COUNT(c.id) AS chunks FROM documents d

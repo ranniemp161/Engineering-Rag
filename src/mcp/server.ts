@@ -11,9 +11,8 @@ import {
 import { loadConfig, type Config } from "../config/load-config.ts";
 import { documentInput, getDocument } from "../retrieval/get-document.ts";
 import { getRelatedDocuments, relatedInput } from "../retrieval/related.ts";
-import { RetrievalError } from "../retrieval/scoped-index.ts";
 import { searchInput, searchKnowledge } from "../retrieval/search-service.ts";
-import { IndexBusyError } from "../storage/turso.ts";
+import { IndexError } from "../storage/index-session.ts";
 import { SERVER_INSTRUCTIONS } from "./instructions.ts";
 import { detectProject } from "./project-detection.ts";
 
@@ -66,8 +65,7 @@ async function toolResult(
       ],
     };
   } catch (error) {
-    const expected =
-      error instanceof RetrievalError || error instanceof IndexBusyError;
+    const expected = error instanceof IndexError;
     if (!expected) console.error("Local retrieval failed:", error);
     return {
       isError: true,

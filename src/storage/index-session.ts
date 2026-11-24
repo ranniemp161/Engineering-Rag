@@ -1,18 +1,111 @@
 import { connect, type Database } from "@tursodatabase/database";
 import { extractReferences } from "../markdown/references.ts";
 import fsx from "fs-native-extensions";
-import { lstat, mkdir, open } from "node:fs/promises";
+import { access, lstat, mkdir, open } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import type { Config } from "../config/load-config.ts";
 
-export class IndexBusyError extends Error {}
+/** Errors whose messages are safe to show a host or browser: no paths, no SQL. */
+export class IndexError extends Error {}
+export class IndexMissingError extends IndexError {}
+export class IndexBusyError extends IndexError {}
+export class IndexRootChangedError extends IndexError {}
+export class UnknownScopeError extends IndexError {}
+export class IndexUpgradeNeededError extends IndexError {}
 
-export async function withIndex<T>(
+export type SessionConfig = {
+  databasePath: Config["databasePath"];
+  scopes: readonly Pick<Config["scopes"][number], "id" | "rootPath">[];
+};
+
+/** Schema features of the opened index. Read sessions may see older schemas. */
+export type IndexCapabilities = { embeddings: boolean; references: boolean };
+
+export type IndexSession = { db: Database; capabilities: IndexCapabilities };
+
+/**
+ * Opens the index read-only under the shared guard. A missing index creates
+ * nothing. Throws IndexRootChangedError when an indexed root of `scopeIds`
+ * no longer matches the configuration.
+ */
+export async function withReadSession<T>(
+  config: SessionConfig,
+  scopeIds: readonly string[],
+  operation: (session: IndexSession) => Promise<T>,
+): Promise<T> {
+  knownScopes(config, scopeIds);
+  await access(config.databasePath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT")
+      throw new IndexMissingError("Index missing. Run the index command first.");
+    throw error;
+  });
+  return guarded(config.databasePath, true, async (db) => {
+    const capabilities = capabilitiesOf(await migrate(db, true));
+    await verifyRoots(db, config, scopeIds, () =>
+      new IndexRootChangedError("Indexed scope root has changed. Rebuild the index."),
+    );
+    return operation({ db, capabilities });
+  });
+}
+
+/**
+ * Opens the index for writing, creating or upgrading the schema. Unless
+ * rebuilding, refuses a scope in `scopeIds` whose indexed root has moved.
+ */
+export async function withWriteSession<T>(
+  config: SessionConfig,
+  scopeIds: readonly string[],
+  operation: (session: IndexSession) => Promise<T>,
+  options: { rebuild?: boolean } = {},
+): Promise<T> {
+  knownScopes(config, scopeIds);
+  await mkdir(path.dirname(config.databasePath), { recursive: true });
+  return guarded(config.databasePath, false, async (db) => {
+    const capabilities = capabilitiesOf(await migrate(db, false));
+    if (!options.rebuild)
+      await verifyRoots(db, config, scopeIds, (id) =>
+        new IndexRootChangedError(
+          `Scope ${id} changed roots. Use rebuild to replace its previous index.`,
+        ),
+      );
+    return operation({ db, capabilities });
+  });
+}
+
+function knownScopes(config: SessionConfig, scopeIds: readonly string[]) {
+  for (const id of scopeIds)
+    if (!config.scopes.some((scope) => scope.id === id))
+      throw new UnknownScopeError("Unknown scope ID");
+}
+
+function capabilitiesOf(version: number): IndexCapabilities {
+  return { embeddings: version >= 2, references: version >= 3 };
+}
+
+async function verifyRoots(
+  db: Database,
+  config: SessionConfig,
+  scopeIds: readonly string[],
+  changed: (id: string) => IndexError,
+) {
+  if (!scopeIds.length) return;
+  const rows = await db.all(
+    `SELECT id,root_path FROM scopes WHERE id IN (${scopeIds.map(() => "?").join(",")})`,
+    ...scopeIds,
+  );
+  for (const row of rows) {
+    const scope = config.scopes.find((s) => s.id === row.id);
+    if (!scope || path.relative(scope.rootPath, row.root_path) !== "")
+      throw changed(row.id);
+  }
+}
+
+async function guarded<T>(
   file: string,
   readonly: boolean,
   operation: (db: Database) => Promise<T>,
 ): Promise<T> {
-  await mkdir(path.dirname(file), { recursive: true });
   for (const suffix of ["", ".guard", "-wal", "-shm", "-journal"]) {
     const info = await lstat(file + suffix).catch(
       (error: NodeJS.ErrnoException) => {
@@ -79,7 +172,7 @@ export async function writeReferences(
  * connection accepts older versions; features they lack report that the
  * index needs a write to upgrade.
  */
-export async function migrate(db: Database, readonly: boolean): Promise<number> {
+async function migrate(db: Database, readonly: boolean): Promise<number> {
   const tables = await db.all(
     "SELECT name FROM sqlite_schema WHERE type='table'",
   );
