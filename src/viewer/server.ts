@@ -33,8 +33,9 @@ const { values } = parseArgs({
 const evalFile = path.resolve(values.eval);
 const baselineFile = values.baseline && path.resolve(values.baseline);
 const port = Number(values.port);
-if (!Number.isInteger(port) || port < 1 || port > 65535)
-  throw new Error("--port must be an integer from 1 to 65535");
+// Port 0 lets the OS choose a free port; the ready line reports the bound one.
+if (!Number.isInteger(port) || port < 0 || port > 65535)
+  throw new Error("--port must be an integer from 0 to 65535");
 
 async function api(route: string, query: URLSearchParams) {
   const config = await loadConfig(undefined, { allowUnavailableRoots: true });
@@ -132,7 +133,8 @@ server.on("error", (error) => {
   process.exitCode = 1;
 });
 server.listen(port, "127.0.0.1", () => {
-  const address = `http://127.0.0.1:${port}`;
+  const bound = server.address();
+  const address = `http://127.0.0.1:${typeof bound === "object" && bound ? bound.port : port}`;
   console.error(`Engineering index viewer: ${address} (Ctrl+C to stop)`);
   if (values["no-open"]) return;
   const opener =

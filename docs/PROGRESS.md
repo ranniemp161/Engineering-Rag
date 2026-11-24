@@ -338,7 +338,14 @@ A two-axis review of PR #3 (standards and agreed design) found gaps; fixed on th
 
 Unresolved, and left for the operator:
 - Rerun the checks on Node 24 LTS.
-- The viewer test's free-port race and stderr polling.
 - CLI `status` catching "index missing" as an exception rather than a result type.
 - Repeated `{ databasePath, scopes: [] }` setup in tests.
 - Viewer validation messages hidden behind the generic message.
+
+### Removed the viewer test port race
+
+The viewer tests picked a free port, closed it, then started the viewer on it, so another process could take the port in between; readiness was found by polling stderr.
+- **Viewer:** `--port 0` now lets the OS choose a free port, and the ready line reports the bound address (`src/viewer/server.ts`, README).
+- **Tests:** new helper `tests/start-viewer.ts` starts the viewer on port 0 and waits for stderr lines as events, rejecting if the viewer exits or after a timeout. `tests/viewer.test.ts` and the viewer test in `tests/eval.test.ts` use it; both `freePort()` copies are gone.
+
+**Checks** (Node 26.12.1): build, typecheck and lint passed; 41/41 tests passed; the two viewer suites passed three runs in a row.
